@@ -36,6 +36,7 @@ Always state the resolved model in the final report.
 - Max **5 review rounds**. A debated-and-unchanged diff is never re-submitted — if nothing changed since the last round, stop and report the divergence instead of looping.
 - Run every `codex` command with the Bash tool `timeout` set to `300000` ms. On a hang, kill and retry once.
 - On a rate-limit/quota error (rolling 5-hour window), stop the loop, surface whatever `remaining`/`resetsAt` info the error JSONL carries, and tell the user.
+- All scratch files live in the per-run `$RUN_DIR` created in step 1. **Never use fixed shared paths** (e.g. `/tmp/codex-debate-*.json`) — concurrent debates in different sessions on the same machine would clobber each other's verdicts.
 
 ## Workflow
 
@@ -43,8 +44,11 @@ Always state the resolved model in the final report.
 
 ```bash
 BASE=$(git rev-parse HEAD)
+RUN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/codex-debate.XXXXXX")   # per-run scratch, safe under concurrent debates
 git status --porcelain
 ```
+
+Reuse the same `$BASE` and `$RUN_DIR` for every round of this debate (shell state does not persist between Bash calls — re-derive or inline the literal values each time).
 
 If the tree is already dirty, note which changes predate the task and say so in the review prompt — they will appear in the diff.
 
@@ -64,8 +68,8 @@ git diff --unified=5 "$BASE" | codex exec \
   -m "$MODEL" -c model_reasoning_effort=xhigh \
   --sandbox read-only --json \
   --output-schema "$SCHEMA" \
-  -o /tmp/codex-debate-verdict.json \
-  "<review prompt>" | tee /tmp/codex-debate-events.jsonl | tail -3
+  -o "$RUN_DIR/verdict.json" \
+  "<review prompt>" | tee "$RUN_DIR/events.jsonl" | tail -3
 ```
 
 Review prompt template:
@@ -75,8 +79,8 @@ Review prompt template:
 Then extract:
 
 ```bash
-THREAD_ID=$(jq -r 'select(.type=="thread.started").thread_id' /tmp/codex-debate-events.jsonl)
-jq . /tmp/codex-debate-verdict.json    # {verdict, summary, findings[]}
+THREAD_ID=$(jq -r 'select(.type=="thread.started").thread_id' "$RUN_DIR/events.jsonl")
+jq . "$RUN_DIR/verdict.json"    # {verdict, summary, findings[]}
 ```
 
 Keep `THREAD_ID` for all later rounds (explicit UUID, never `--last`).
@@ -99,7 +103,7 @@ Project conventions (CLAUDE.md, docs/) outrank reviewer taste — convention con
   -m "$MODEL" -c model_reasoning_effort=xhigh \
   --sandbox read-only --json \
   --output-schema "$SCHEMA" \
-  -o /tmp/codex-debate-verdict.json - | tail -3
+  -o "$RUN_DIR/verdict.json" - | tail -3
 ```
 
 ### 6. Terminate

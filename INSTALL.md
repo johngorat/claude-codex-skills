@@ -151,13 +151,17 @@ From inside a git project (Bash timeout 300000 ms), with `$SCHEMA` pointing at
 the installed `review-schema.json`:
 
 ```bash
+V=$(mktemp "${TMPDIR:-/tmp}/codex-debate-smoke.XXXXXX")
 echo "diff: (empty — this is a wiring test). Return verdict APPROVED, empty findings." | \
 codex exec -m <verified-slug> -c model_reasoning_effort=low --sandbox read-only --json \
   --output-schema "$SCHEMA" \
-  -o /tmp/codex-debate-verdict.json \
+  -o "$V" \
   "You are a code reviewer. Follow the stdin instruction." 2>&1 | tail -3
-cat /tmp/codex-debate-verdict.json
+cat "$V"
 ```
+
+(Unique temp path via `mktemp` on purpose — fixed shared paths would collide
+with a debate running in another session on the same machine.)
 
 Expected: `{"verdict":"APPROVED","summary":"...","findings":[]}`.
 (`<verified-slug>` = the model chosen in Step 5.)
