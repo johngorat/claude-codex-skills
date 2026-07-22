@@ -1,43 +1,135 @@
 # claude-codex-skills
 
 Claude Code skills that wire **OpenAI Codex** in as an independent, adversarial
-code reviewer. Codex runs in a read-only OS sandbox on your ChatGPT
-subscription; Claude stays the one making changes.
+code reviewer. Two different frontier models check each other's work: Claude
+writes the code, Codex (GPT-5.6 Sol) tries to tear it apart, and the loop only
+ends when the reviewer signs off — or a human breaks the tie.
 
-## Install
+Codex runs in a **read-only OS-enforced sandbox** on your ChatGPT subscription.
+It cannot edit files, and its feedback is never applied blindly — Claude judges
+every finding and pushes back on false positives with evidence.
 
-Clone this repo (or download the zip), open Claude Code, and say:
+## How the debate loop works
 
 ```
-follow INSTALL.md from <path to this repo>
+/codex-debate <task>
+      │
+      ▼
+ 1. Claude implements the task, runs local checks (compile/tests)
+      │
+      ▼
+ 2. git diff  ──►  codex exec (GPT-5.6 Sol, --sandbox read-only)
+      │                    returns {verdict, findings[]} per JSON schema
+      ▼
+ 3. APPROVED? ──yes──►  done: report rounds, fixes, rebuttals
+      │no
+      ▼
+ 4. Claude judges each finding:
+      real → fix   ·   wrong → rebut with evidence (file:line, docs, tests)
+      │
+      ▼
+ 5. Fixes + rebuttals + updated diff ──► codex exec resume <same thread>
+      └──── loop to 3  (max 5 rounds; an unchanged diff is never re-sent)
 ```
 
-Claude handles the rest adaptively — Codex CLI install/upgrade, login, model
-availability probe (with automatic fallback), copying the skills, and a smoke
-test. You'll be asked one thing: install **per-project**
-(`<project>/.claude/skills/`) or **per-user** (`~/.claude/skills/`, all projects
-on the machine).
-
-Requirements: git, Node ≥ 22, a ChatGPT plan with Codex enabled
-(Free/Plus/Pro/Business/Edu/Enterprise — for company workspaces an admin must
-have "Allow members to use Codex Local" on).
+Deadlocks go to the human: after 5 rounds without consensus, or if Codex
+repeats findings on an unchanged diff, the loop stops and presents both
+positions.
 
 ## Skills
 
 | Skill | What it does |
 |---|---|
-| [`codex-debate`](skills/codex-debate/SKILL.md) | Run a task, then debate the resulting diff with Codex (GPT-5.6 Sol, read-only) — fix real findings, rebut false ones with evidence, loop until `APPROVED` + green local checks. Max 5 rounds, anti-loop guards. |
+| [`codex-debate`](skills/codex-debate/SKILL.md) | Run a task, then debate the resulting diff with Codex — fix real findings, rebut false ones, loop until `APPROVED` + green local checks. |
 
-More Codex-related skills may land here later — each lives in its own folder
-under `skills/`, self-contained (SKILL.md + bundled files), and installs the
+Each skill is a self-contained folder under `skills/` (SKILL.md + bundled
+files). More Codex-related skills may land here later; they all install the
 same way.
+
+## Requirements
+
+- [Claude Code](https://claude.com/claude-code) (CLI, desktop, or IDE extension)
+- git, Node ≥ 22
+- A ChatGPT plan with Codex enabled (Free/Plus/Pro/Business/Edu/Enterprise).
+  Company workspaces: an admin must have **"Allow members to use Codex Local"**
+  switched on at chatgpt.com/admin/settings.
+- No OpenAI API key needed — auth is the Codex CLI's own `codex login` (OAuth);
+  reviews draw from the plan's rolling 5-hour quota, not a per-token bill.
+
+## Installation
+
+### Option A — let Claude install it (recommended)
+
+Clone this repo, open Claude Code, and say:
+
+```
+follow INSTALL.md from <path to this repo>
+```
+
+Claude works through [INSTALL.md](INSTALL.md) adaptively: detects your OS
+(macOS/Windows/Linux), installs or upgrades the Codex CLI (≥ 0.145.0 via
+`npm install -g @openai/codex@latest`), walks you through `codex login`, probes
+that `gpt-5.6-sol` is available on your plan (falls back to `gpt-5.5`
+automatically if not), copies the skill, and runs a smoke test. You'll be asked
+one thing — the install scope:
+
+- **Project** — `<project>/.claude/skills/` — travels with that repo, teammates
+  get it on clone if committed.
+- **User** — `~/.claude/skills/` (Windows: `%USERPROFILE%\.claude\skills`) —
+  available in every project on your machine.
+
+### Option B — manual (2 minutes)
+
+```bash
+# 1. Codex CLI + login (once per machine)
+npm install -g @openai/codex@latest
+codex login                          # browser OAuth into your ChatGPT workspace
+
+# 2. Copy the skill — pick ONE scope
+cp -R skills/codex-debate  <your-project>/.claude/skills/   # project scope
+cp -R skills/codex-debate  ~/.claude/skills/                # user scope
+
+# 3. Restart your Claude Code session so the skill registers
+```
+
+If your plan doesn't have GPT-5.6 Sol yet, edit both `-m gpt-5.6-sol`
+occurrences in the copied `SKILL.md` to `-m gpt-5.5`.
+
+## Usage
+
+Implement something with review built in:
+
+```
+/codex-debate add a retry with exponential backoff to the upload client, max 3 attempts
+```
+
+Review-only for work that's already done:
+
+```
+/codex-debate review current changes, the task was: <what was done>
+```
+
+At the end you get a report: rounds used, findings fixed, findings rebutted and
+why, or — on deadlock — both sides' positions so you can decide.
 
 ## Security posture
 
-- Codex is always invoked with `--sandbox read-only`; the bypass flag
-  (`--dangerously-bypass-approvals-and-sandbox`) is explicitly forbidden by the
-  skill's hard rules.
-- No API keys are used or stored by these skills — auth is the Codex CLI's own
-  `codex login` (OAuth; tokens live in `~/.codex/auth.json`, managed by the CLI).
-- Reviewer feedback is never auto-applied: Claude judges every finding, and on
-  disagreement the human decides.
+- Codex is always invoked with `--sandbox read-only`; the skill's hard rules
+  explicitly forbid `--dangerously-bypass-approvals-and-sandbox`.
+- No API keys are used or stored by these skills. OAuth tokens live in
+  `~/.codex/auth.json`, managed entirely by the Codex CLI.
+- Reviewer feedback is never auto-applied; Claude verifies each finding against
+  the actual code first.
+- Codex holds a veto over "done", not decision power: it cannot change code,
+  and unresolved disagreements always land with the human.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `codex login status` looks empty | It prints to **stderr** — check `codex login status 2>&1` |
+| `403 - Unauthorized. Contact your ChatGPT administrator` | Admin must enable "Allow members to use Codex Local" |
+| `Error 400: No eligible ChatGPT workspaces found` | Same admin toggle — workspace not Codex-enabled |
+| 401 `require_sso_login` | `codex logout && codex login` |
+| "model requires a newer version of Codex" | `npm install -g @openai/codex@latest` |
+| Rate-limit mid-debate | Plan quota (rolling 5-hour window) exhausted — the loop stops cleanly; retry later |
