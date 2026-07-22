@@ -1,15 +1,33 @@
 ---
 name: codex-debate
-description: Run a task, then have Codex (GPT-5.6 Sol) adversarially review the resulting diff, debate the findings, fix what is real, and loop until APPROVED. Use when the user asks for a task with codex review/debate, a second-opinion review loop, or independent verification of a change.
+description: Run a task, then have Codex (top available GPT model, e.g. GPT-5.6 Sol) adversarially review the resulting diff, debate the findings, fix what is real, and loop until APPROVED. Use when the user asks for a task with codex review/debate, a second-opinion review loop, or independent verification of a change.
 ---
 
 # Codex Debate Loop
 
 ## Quick Start
 
-`/codex-debate <task>` — implement the task, get an adversarial review of the diff from Codex (GPT-5.6 Sol), debate each finding, fix real issues, and loop until Codex returns `APPROVED` **and** local project checks are green.
+`/codex-debate <task>` — implement the task, get an adversarial review of the diff from Codex (top-tier model available on the plan), debate each finding, fix real issues, and loop until Codex returns `APPROVED` **and** local project checks are green.
 
 If the work is already done and only a review is wanted, skip step 2 and start at step 3.
+
+## Model Selection
+
+Resolve `$MODEL` once at the start of the loop, in this order:
+
+1. **User override** — if the invocation names a model or tier ("use terra", "on luna", "with 5.5"), map it to the slug (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, …) and use that.
+2. **Pinned model** — if a `model.txt` exists next to this SKILL.md, use its contents (written by the installer or the user to save quota).
+3. **Auto (default)** — the top tier the CLI knows about:
+
+```bash
+MODEL=$(jq -r '[.models[] | select(.visibility=="list")] | sort_by(.priority) | .[0].slug' ~/.codex/models_cache.json)
+```
+
+Lower `priority` = higher tier (1 = flagship). The cache refreshes whenever codex runs, so new families (5.7, 5.8, …) are picked up automatically.
+
+If a codex call fails with a **model-access error** mid-loop, step down to the next slug by ascending priority and continue; in the final report state which model actually reviewed, and advise the user to request top-tier access from their ChatGPT workspace admin or upgrade the subscription.
+
+Always state the resolved model in the final report.
 
 ## Hard Rules
 
@@ -38,12 +56,12 @@ Never send a diff to review that you already know is broken.
 
 ### 3. Review round 1
 
-Resolve the schema path first: this skill's own directory (project or user scope), e.g. `SCHEMA=<skill dir>/review-schema.json`.
+Resolve `$MODEL` (see Model Selection) and the schema path: `SCHEMA=<skill dir>/review-schema.json`.
 
 ```bash
 git add -N .   # intent-to-add: new files show up in the diff
 git diff --unified=5 "$BASE" | codex exec \
-  -m gpt-5.6-sol -c model_reasoning_effort=xhigh \
+  -m "$MODEL" -c model_reasoning_effort=xhigh \
   --sandbox read-only --json \
   --output-schema "$SCHEMA" \
   -o /tmp/codex-debate-verdict.json \
@@ -78,7 +96,7 @@ Project conventions (CLAUDE.md, docs/) outrank reviewer taste — convention con
 ```bash
 { printf '%s\n\n' "Round N reply. FIXED: <list>. REBUTTED (with evidence): <list>. Full updated diff follows."; \
   git diff --unified=5 "$BASE"; } | codex exec resume "$THREAD_ID" \
-  -m gpt-5.6-sol -c model_reasoning_effort=xhigh \
+  -m "$MODEL" -c model_reasoning_effort=xhigh \
   --sandbox read-only --json \
   --output-schema "$SCHEMA" \
   -o /tmp/codex-debate-verdict.json - | tail -3
@@ -86,7 +104,7 @@ Project conventions (CLAUDE.md, docs/) outrank reviewer taste — convention con
 
 ### 6. Terminate
 
-- `APPROVED` + local checks green → **success**. Report rounds used, findings fixed, findings rebutted.
+- `APPROVED` + local checks green → **success**. Report rounds used, findings fixed, findings rebutted, and the reviewer model.
 - 5 rounds without `APPROVED` → stop. Present the unresolved findings and your position on each; the user decides.
 - Codex repeats findings on an unchanged diff → stop, report the divergence (see Hard Rules).
 
@@ -94,7 +112,7 @@ Never claim success on your own judgment alone — success is the verdict plus g
 
 ### Escalation knob
 
-Default effort is `xhigh`. For a final gate on a risky change, one round at `-c model_reasoning_effort=max` (or `ultra`; slow and quota-heavy — it spawns internal subagents) is acceptable. Do not run the whole loop above `xhigh`.
+Default effort is `xhigh`. For a final gate on a risky change, one round at `-c model_reasoning_effort=max` (or `ultra`, where the model supports it; slow and quota-heavy — it spawns internal subagents) is acceptable. Do not run the whole loop above `xhigh`.
 
 ## Troubleshooting
 
@@ -102,3 +120,4 @@ Default effort is `xhigh`. For a final gate on a risky change, one round at `-c 
 - 401 `require_sso_login` → `codex logout && codex login`.
 - "model requires a newer version of Codex" → `npm install -g @openai/codex@latest`.
 - Available models: `jq -r '.models[].slug' ~/.codex/models_cache.json`.
+- Reviews too slow / quota too tight → pin a cheaper tier: `echo gpt-5.6-terra > <skill dir>/model.txt` (delete the file to return to auto top-tier).

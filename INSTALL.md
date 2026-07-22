@@ -13,11 +13,11 @@
 ## What you are setting up
 
 Skills from this repo's `skills/` folder — currently `codex-debate`: Claude
-implements a task, sends the diff to OpenAI Codex (GPT-5.6 Sol, read-only
-sandbox) for adversarial review, debates the findings (fixes real ones, rebuts
-false positives with evidence), and loops — resuming the same Codex thread —
-until Codex returns `APPROVED` and local checks are green. Max 5 rounds,
-anti-loop guards included.
+implements a task, sends the diff to OpenAI Codex (top-tier model available on
+the plan, read-only sandbox) for adversarial review, debates the findings
+(fixes real ones, rebuts false positives with evidence), and loops — resuming
+the same Codex thread — until Codex returns `APPROVED` and local checks are
+green. Max 5 rounds, anti-loop guards included.
 
 Codex runs on a ChatGPT subscription (OAuth login), not a paid API key — review
 tokens draw from the plan's rolling 5-hour quota window, not a per-token bill.
@@ -81,21 +81,50 @@ ChatGPT workspace. Known failure modes:
 | 401 `require_sso_login` after SSO refresh | `codex logout && codex login` |
 | No browser (headless/remote) | `codex login --device-auth` |
 
-## Step 5 — Verify model access
+## Step 5 — Discover available models, verify the top tier, let the human choose
 
-From inside any git directory (Bash timeout ≥ 180000 ms):
+All probes run from inside a git directory, Bash timeout ≥ 180000 ms.
 
-```bash
-echo "" | codex exec -m gpt-5.6-sol --sandbox read-only --json "Reply with exactly: OK" 2>&1 | tail -6
-```
+1. **Refresh the model catalog** (it updates whenever codex runs):
 
-- `agent_message` with `OK` → proceed with `gpt-5.6-sol`.
-- Error "requires a newer version of Codex" → redo Step 3 upgrade.
-- Error saying the model is **not available for this plan/workspace** → fall
-  back: probe `gpt-5.5` the same way; if it works, after Step 6 edit both
-  `-m gpt-5.6-sol` occurrences in the copied SKILL.md to `-m gpt-5.5`. Tell the
-  human about the fallback.
-- Rate-limit error → the 5-hour quota window is exhausted; wait and retry.
+   ```bash
+   echo "" | codex exec --sandbox read-only --json "Reply with exactly: OK" 2>&1 | tail -3
+   ```
+
+2. **List what the CLI sees**, best tier first (lower `priority` = higher tier):
+
+   ```bash
+   jq -r '[.models[] | select(.visibility=="list")] | sort_by(.priority) | .[] | "\(.slug) — \(.description)"' ~/.codex/models_cache.json
+   ```
+
+3. **Live-probe the top entry** — a catalog listing does not guarantee plan
+   access:
+
+   ```bash
+   echo "" | codex exec -m <top-slug> --sandbox read-only --json "Reply with exactly: OK" 2>&1 | tail -6
+   ```
+
+   - `agent_message` with `OK` → top tier verified.
+   - "requires a newer version of Codex" → redo Step 3 upgrade, probe again.
+   - Model-access / plan error → **tell the human plainly**: the top-tier model
+     is not available on this plan/workspace, and they should ask their ChatGPT
+     workspace admin for access or upgrade the subscription to get the strongest
+     reviewer. Then probe the next slugs in priority order (e.g. terra → luna →
+     gpt-5.5) until one verifies.
+   - Rate-limit error → the 5-hour quota window is exhausted; wait and retry.
+
+4. **Ask the human to choose** among the verified models. Recommend the best
+   verified tier for the reviewer role; mention that cheaper tiers (terra/luna)
+   review faster and burn less quota, at the cost of shallower critique.
+
+5. Remember the choice for Step 6:
+   - Best verified tier chosen and it equals the catalog top → **no pin**: the
+     skill's auto mode always resolves the top catalog entry, so it will pick up
+     future families (5.7, 5.8, …) automatically.
+   - Anything else chosen (or the catalog top is NOT accessible on this plan) →
+     **pin it**: after copying the skill, write the slug into
+     `<skill dir>/model.txt` (e.g. `echo gpt-5.6-terra > .../model.txt`). The
+     pin prevents the auto mode from repeatedly trying an inaccessible flagship.
 
 ## Step 6 — Copy the skill folders
 
@@ -110,7 +139,11 @@ mkdir -p "<project>/.claude/skills" && cp -R skills/codex-debate "<project>/.cla
 mkdir -p ~/.claude/skills && cp -R skills/codex-debate ~/.claude/skills/
 ```
 
-Apply the model fallback edit from Step 5 now if needed.
+If Step 5 decided on a pin, write it now:
+
+```bash
+echo <chosen-slug> > "<installed skill dir>/model.txt"
+```
 
 ## Step 7 — Smoke test
 
@@ -119,7 +152,7 @@ the installed `review-schema.json`:
 
 ```bash
 echo "diff: (empty — this is a wiring test). Return verdict APPROVED, empty findings." | \
-codex exec -m gpt-5.6-sol -c model_reasoning_effort=low --sandbox read-only --json \
+codex exec -m <verified-slug> -c model_reasoning_effort=low --sandbox read-only --json \
   --output-schema "$SCHEMA" \
   -o /tmp/codex-debate-verdict.json \
   "You are a code reviewer. Follow the stdin instruction." 2>&1 | tail -3
@@ -127,14 +160,17 @@ cat /tmp/codex-debate-verdict.json
 ```
 
 Expected: `{"verdict":"APPROVED","summary":"...","findings":[]}`.
-(Use the fallback model here too if Step 5 fell back.)
+(`<verified-slug>` = the model chosen in Step 5.)
 
 ## Step 8 — Report to the human
 
 Tell them, in plain language:
 
 - Codex CLI version installed/upgraded and where it came from.
-- Which model was verified (`gpt-5.6-sol`, or the fallback and why).
+- Which model was chosen and verified — and whether it runs in auto top-tier
+  mode (will pick up future model families automatically) or is pinned via
+  `model.txt`. If the flagship was NOT accessible, repeat the advice to request
+  access or upgrade the subscription.
 - Which skills were installed and at which scope (restart the Claude Code
   session for the new skill to appear).
 - That auth is via their ChatGPT workspace login — reviews consume the plan's
