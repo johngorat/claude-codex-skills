@@ -42,7 +42,18 @@ positions.
 
 | Skill | What it does |
 |---|---|
-| [`codex-debate`](skills/codex-debate/SKILL.md) | Run a task, then debate the resulting diff with Codex — fix real findings, rebut false ones, loop until `APPROVED` + green local checks. |
+| [`codex-debate`](skills/codex-debate/SKILL.md) | Run a task, then debate the resulting diff with Codex — fix real findings, rebut false ones, loop until `APPROVED` + green local checks. Up to 5 rounds, flagship model. |
+| [`codex-check`](skills/codex-check/SKILL.md) | One-shot advisory review of the diff — single round, second-tier model, no loop. Claude triages the findings; an unresolved major escalates to `/codex-debate`. |
+
+### Which one to use
+
+- `/codex-check` — routine changes that follow already-reviewed patterns, small
+  diffs, config/docs edits, a quick pre-commit sanity pass.
+- `/codex-debate` — infrastructure code, the first run of a new pipeline or
+  template, validators and self-checks, changes whose bugs surface late and are
+  expensive to find.
+- Escalation: if a check leaves a `blocker`/`major` finding standing, run a full
+  debate for that change. The cheap pass doubles as triage for the expensive one.
 
 Each skill is a self-contained folder under `skills/` (SKILL.md + bundled
 files). More Codex-related skills may land here later; they all install the
