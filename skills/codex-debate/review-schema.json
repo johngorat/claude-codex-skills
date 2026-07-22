@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "findings"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["APPROVED", "REVISE"],
+      "description": "APPROVED only when there are no blocker or major findings left"
+    },
+    "summary": {
+      "type": "string",
+      "description": "One-paragraph overall assessment of the diff"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["file", "line", "severity", "issue", "suggestion", "confidence"],
+        "properties": {
+          "file": { "type": "string", "description": "Repo-relative path" },
+          "line": { "type": ["integer", "null"], "description": "1-based line in the new file, null if file-wide" },
+          "severity": { "type": "string", "enum": ["blocker", "major", "minor", "nit"] },
+          "issue": { "type": "string", "description": "Concrete defect and failure scenario, not a style preference" },
+          "suggestion": { "type": ["string", "null"], "description": "Proposed fix, null if none" },
+          "confidence": { "type": "number", "description": "0..1 self-assessed confidence the finding is real" }
+        }
+      }
+    }
+  }
+}
