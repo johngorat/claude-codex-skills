@@ -44,9 +44,12 @@ positions.
 |---|---|
 | [`codex-debate`](skills/codex-debate/SKILL.md) | Run a task, then debate the resulting diff with Codex — fix real findings, rebut false ones, loop until `APPROVED` + green local checks. Up to 5 rounds, flagship model. |
 | [`codex-check`](skills/codex-check/SKILL.md) | One-shot advisory review of the diff — single round, second-tier model, no loop. Claude triages the findings; an unresolved major escalates to `/codex-debate`. |
+| [`codex-plan`](skills/codex-plan/SKILL.md) | Turn a multi-stage task into a staged plan: review tier per stage, past reviewer findings baked in as hard requirements, tools to reuse named. Approve the plan, then it executes via the two skills above. |
 
 ### Which one to use
 
+- `/codex-plan` — the entry point for anything multi-stage (a port, a migration,
+  a new pipeline run). It decides where the other two are applied.
 - `/codex-check` — routine changes that follow already-reviewed patterns, small
   diffs, config/docs edits, a quick pre-commit sanity pass.
 - `/codex-debate` — infrastructure code, the first run of a new pipeline or
