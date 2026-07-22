@@ -97,14 +97,29 @@ Project conventions (CLAUDE.md, docs/) outrank reviewer taste — convention con
 
 ### 5. Rounds 2..5 — resume the same thread
 
+`resume` does not take the same flags as `exec`, in two ways that both fail the
+command outright:
+
+- **every option must come before `SESSION_ID`** — the usage is
+  `codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]`, so an option after the id
+  is read as a positional argument;
+- **there is no `--sandbox` on `resume`** — set it with `-c sandbox_mode` instead.
+  The read-only rule still holds; it is passed as config, not as a flag.
+
 ```bash
 { printf '%s\n\n' "Round N reply. FIXED: <list>. REBUTTED (with evidence): <list>. Full updated diff follows."; \
-  git diff --unified=5 "$BASE"; } | codex exec resume "$THREAD_ID" \
-  -m "$MODEL" -c model_reasoning_effort=xhigh \
-  --sandbox read-only --json \
+  git diff --unified=5 "$BASE"; } | codex exec resume \
+  -m "$MODEL" \
+  -c model_reasoning_effort=xhigh \
+  -c sandbox_mode='"read-only"' \
+  --json \
   --output-schema "$SCHEMA" \
-  -o "$RUN_DIR/verdict.json" - | tail -3
+  -o "$RUN_DIR/verdict.json" \
+  "$THREAD_ID" - | tail -3
 ```
+
+The trailing `-` is the PROMPT argument and means "read the prompt from stdin";
+it must stay last, after the session id.
 
 ### 6. Terminate
 
@@ -120,6 +135,9 @@ Default effort is `xhigh`. For a final gate on a risky change, one round at `-c 
 
 ## Troubleshooting
 
+- `error: unexpected argument '--sandbox' found` on round 2 → the resume call put
+  options after `SESSION_ID`, or passed `--sandbox`, which `resume` does not have.
+  See step 5: options first, `-c sandbox_mode='"read-only"'`, id and `-` last.
 - `codex login status` prints to **stderr** — check both streams for "Logged in".
 - 401 `require_sso_login` → `codex logout && codex login`.
 - "model requires a newer version of Codex" → `npm install -g @openai/codex@latest`.
