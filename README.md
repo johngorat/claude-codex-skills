@@ -64,13 +64,14 @@ same way.
 
 ## UE→Cocos porting pack (`skills-ue-cocos/`)
 
-A self-contained, sharpened pack for porting UE Niagara FX to Cocos. It builds
-ON TOP of the generic family (its gates are executed by invoking
-`codex-debate`/`codex-check`), while the generic family stays pure — it never
-references this pack or its conventions. Install the same way (copy or symlink
-each skill folder into `~/.claude/skills/`); additionally requires `python3`
-(3.8+, stdlib only) on PATH — the pack's contract checks are executable
-scripts, not prose.
+A sharpened companion pack for porting UE Niagara FX to Cocos. It **requires
+the generic family to be installed** — its gates are executed by invoking
+`codex-debate`/`codex-check` and its planning follows `codex-plan` — while the
+generic family stays pure and never references this pack or its conventions.
+Install by copying or symlinking each pack skill folder into
+`~/.claude/skills/` alongside the generic three; additionally requires
+`python3` (3.8+, stdlib only) on PATH — the pack's contract checks are
+executable scripts, not prose.
 
 | Skill | What it does |
 |---|---|
