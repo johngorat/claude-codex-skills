@@ -117,10 +117,10 @@ bash "<skill dir>/scripts/review-round.sh" "$RUN_DIR" "$MODEL" xhigh "$SCHEMA" "
 
 Poll the same way as in step 3.
 
-On very large diffs (roughly 2,000+ changed lines) intermediate rounds may run
-`-c model_reasoning_effort=high` to stay inside a practical window — keep `xhigh`
-for the final gate round. If a single pass is still impractical, chunk the review
-by file groups within the same thread via `resume`.
+On very large diffs (roughly 2,000+ changed lines) intermediate rounds may pass
+`high` as the script's effort argument to stay inside a practical window — keep
+`xhigh` for the final gate round. If a single pass is still impractical, chunk
+the review by file groups within the same thread via the thread-id argument.
 
 ### 6. Terminate
 
