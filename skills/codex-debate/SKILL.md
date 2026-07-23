@@ -55,7 +55,7 @@ If the tree is already dirty, note which changes predate the task and say so in 
 
 ### 2. Run the task
 
-Implement the task with the normal workflow. Before the first review round, local checks must be green (use this project's compile/build/test skills or commands).
+Implement the task with the normal workflow. Before the first review round, local checks must be green — if the project has a `docs/CODEX-LESSONS.md` (or root `CODEX-LESSONS.md`), use the check skills/commands it names; otherwise use the project's compile/build/test skills or commands.
 
 Never send a diff to review that you already know is broken.
 
