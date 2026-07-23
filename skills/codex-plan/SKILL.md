@@ -67,7 +67,10 @@ Show the plan. After approval, execute stage by stage; after each gate report ro
 
 Generic locations this skill searches in step 2:
 
-- **`docs/CODEX-LESSONS.md` (or `CODEX-LESSONS.md` at the repo root) — check this FIRST.** By convention this file is the project's index of lesson sources: concrete paths to prior plans, value authorities, validators, probes, decision logs, and the project's local check commands/skills. If it exists, its entries take precedence over generic searching.
 - `CLAUDE.md`, `docs/` manual and decision records
 - previous plan documents and their gate reports
 - declared-divergence / known-issues registries
+
+A specialized skill pack or a project may define richer lesson-source and
+checklist conventions of its own; when such a skill governs the task, follow
+its conventions — this generic skill neither names nor depends on any of them.
