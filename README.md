@@ -62,17 +62,20 @@ Each skill is a self-contained folder under `skills/` (SKILL.md + bundled
 files). More Codex-related skills may land here later; they all install the
 same way.
 
-### Specialized skill packs
+## UE→Cocos porting pack (`skills-ue-cocos/`)
 
-Task-specific skills live in their own directories, separate from the generic
-family, and install the same way (copy or symlink the folder into
-`~/.claude/skills/`). Note: unlike the generic pack, `skills-ue-cocos` also
-requires `python3` (3.8+, stdlib only) on PATH — its contract checks are
-executable scripts, not prose:
+A self-contained, sharpened pack for porting UE Niagara FX to Cocos. It builds
+ON TOP of the generic family (its gates are executed by invoking
+`codex-debate`/`codex-check`), while the generic family stays pure — it never
+references this pack or its conventions. Install the same way (copy or symlink
+each skill folder into `~/.claude/skills/`); additionally requires `python3`
+(3.8+, stdlib only) on PATH — the pack's contract checks are executable
+scripts, not prose.
 
-| Pack | Skill | What it does |
-|---|---|---|
-| `skills-ue-cocos/` | [`ue-cocos-anchors-codex`](skills-ue-cocos/ue-cocos-anchors-codex/SKILL.md) | Anchor contract for UE→Cocos FX ports: machine-readable anchors binding every ported value to its UE dump source and Cocos runtime target; script-validated, script-compared — numeric render truth instead of visual verdicts. |
+| Skill | What it does |
+|---|---|
+| [`ue-cocos-port-codex`](skills-ue-cocos/ue-cocos-port-codex/SKILL.md) | The port pipeline orchestrator: harvest → value authority + anchors → implementation + runtime probe → wiring, with review tiers per stage, mandatory pre-gate checklist attestation, and the pack's conventions (`CODEX-LESSONS.md`, `FX-GATE-PRECHECK.md`). Entry point: `/ue-cocos-port-codex <NS_system>`. |
+| [`ue-cocos-anchors-codex`](skills-ue-cocos/ue-cocos-anchors-codex/SKILL.md) | The anchor contract: machine-readable anchors binding every ported value to its UE dump source and Cocos runtime target; script-validated, script-compared — numeric render truth instead of visual verdicts. |
 
 ## Requirements
 
