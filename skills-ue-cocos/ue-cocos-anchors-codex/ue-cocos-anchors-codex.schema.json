@@ -1,0 +1,96 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ue-cocos-anchors-codex/v1 — anchor contract for UE→Cocos FX ports",
+  "description": "Documentation schema. The executable authority is scripts/ue-cocos-anchors-codex.py validate, which implements these rules plus semantic checks (unique ids, tolerance-type consistency, loop-seam coverage, bool-is-not-a-number).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "fx", "sessionId", "anchors"],
+  "properties": {
+    "contract": { "const": "ue-cocos-anchors-codex/v1" },
+    "fx": { "type": "string", "minLength": 1, "description": "Niagara system name, e.g. NS_ky_aura_shine" },
+    "sessionId": { "type": "string", "minLength": 1, "description": "Project session id, e.g. S103" },
+    "loop": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["periodSec"],
+      "properties": { "periodSec": { "type": "number", "exclusiveMinimum": 0 } }
+    },
+    "anchors": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "source", "target", "at", "expected", "tolerance", "units"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(\\.[A-Za-z0-9_-]+)+$",
+            "description": "Canonical join key, derived deterministically from UE names: <emitter>.<module|material>.<param>[.<atTag>]"
+          },
+          "source": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file", "path"],
+            "properties": {
+              "file": { "type": "string", "minLength": 1, "description": "UE dump file (harvest artifact)" },
+              "path": { "type": "string", "minLength": 1, "description": "JSON path / node inside the dump" },
+              "chain": { "type": ["string", "null"], "description": "Chain-trace reference, e.g. _chains_S103.txt#L214" }
+            }
+          },
+          "target": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "node"],
+            "properties": {
+              "kind": { "type": "string", "minLength": 1, "description": "What the probe samples: particle_count, particle_bbox, particle_centroid, material_uniform, pass_state, texture_binding, sort_priority, ..." },
+              "node": { "type": "string", "minLength": 1, "description": "Cocos scene address, e.g. AuraShineFx/dust" },
+              "space": { "type": "string", "enum": ["world", "local"], "description": "Required for spatial kinds; Local buffers must be transformed through the node's world matrix by the probe" },
+              "field": { "type": "string", "description": "Sub-field selector, e.g. uniform name or blendSrc" },
+              "extra": { "type": "object", "description": "Probe-specific parameters" }
+            }
+          },
+          "at": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "cycleTime": { "type": "number", "minimum": 0, "description": "Seconds within the loop cycle" },
+              "tick": { "type": "integer", "minimum": 0, "description": "Deterministic tick index (tick-0 standard)" }
+            },
+            "oneOf": [
+              { "required": ["cycleTime"], "not": { "required": ["tick"] } },
+              { "required": ["tick"], "not": { "required": ["cycleTime"] } }
+            ]
+          },
+          "expected": {
+            "description": "Number, array of numbers, string (enums like blend modes), or bool. Booleans are never accepted where numbers are expected.",
+            "type": ["number", "array", "string", "boolean"],
+            "items": { "type": "number" }
+          },
+          "tolerance": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "abs": { "type": "number", "minimum": 0 },
+              "rel": { "type": "number", "minimum": 0 },
+              "exact": { "type": "boolean" }
+            },
+            "description": "Numeric expected: abs and/or rel (pass if within either). String/bool expected: {\"exact\": true}."
+          },
+          "units": { "type": "string", "minLength": 1, "description": "m, m/s, 0..1, count, enum, flag, ..." },
+          "dd": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "approvedBy"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1, "description": "Declared-divergence id, e.g. DD-7" },
+              "approvedBy": { "const": "USER" }
+            },
+            "description": "USER-approved deliberate divergence — the only legitimate way to differ from the source. Reported as DD by compare, never PASS/FAIL."
+          },
+          "note": { "type": "string" }
+        }
+      }
+    }
+  }
+}
