@@ -62,6 +62,18 @@ Each skill is a self-contained folder under `skills/` (SKILL.md + bundled
 files). More Codex-related skills may land here later; they all install the
 same way.
 
+### Specialized skill packs
+
+Task-specific skills live in their own directories, separate from the generic
+family, and install the same way (copy or symlink the folder into
+`~/.claude/skills/`). Note: unlike the generic pack, `skills-ue-cocos` also
+requires `python3` (3.8+, stdlib only) on PATH — its contract checks are
+executable scripts, not prose:
+
+| Pack | Skill | What it does |
+|---|---|---|
+| `skills-ue-cocos/` | [`ue-cocos-anchors-codex`](skills-ue-cocos/ue-cocos-anchors-codex/SKILL.md) | Anchor contract for UE→Cocos FX ports: machine-readable anchors binding every ported value to its UE dump source and Cocos runtime target; script-validated, script-compared — numeric render truth instead of visual verdicts. |
+
 ## Requirements
 
 - [Claude Code](https://claude.com/claude-code) (CLI, desktop, or IDE extension)

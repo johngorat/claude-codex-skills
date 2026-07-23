@@ -54,6 +54,8 @@ Show the plan. After approval, execute stage by stage; after each gate report ro
 
 **Gate execution means invoking the `/codex-debate` or `/codex-check` skill** for that stage — load the skill and follow its protocol. Never substitute an ad-hoc codex CLI call: in particular `codex review` / `codex exec review` is OpenAI's own separate review flow — it bypasses the round protocol, the verdict schema, the model selection, and the sandbox rules, and does NOT count as a gate.
 
+**Scorecard (mandatory in the final report).** Per gate: tier, reviewer model, rounds used, wall-clock, findings fixed/rebutted. Totals: input tokens — sum `turn.completed` usage across ALL events logs in each gate's run dir (`events.jsonl` plus the rotated `events.r*.jsonl`; review-round.sh rotates rounds instead of truncating precisely so this data survives), findings caught before review (validator/checklist attestation) vs findings raised by the reviewer, and user-found issues after gates. If the project keeps session records, append the same scorecard there — trend across tasks is the measure of the process itself.
+
 ## Plan quality bar
 
 - Every requirement is traceable to a past finding, a project rule, or a gated artifact — no generic advice.

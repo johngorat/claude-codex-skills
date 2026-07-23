@@ -54,9 +54,12 @@ git diff --unified=5 "$BASE" | codex exec \
   --sandbox read-only --json \
   --output-schema "$SCHEMA" \
   -o "$RUN_DIR/verdict.json" \
-  "<review prompt>" | tail -3
+  "<review prompt>" | tee "$RUN_DIR/events.jsonl" | tail -3
 jq . "$RUN_DIR/verdict.json"
 ```
+
+(`tee` keeps the events log — its `turn.completed` usage feeds the codex-plan
+scorecard; without it the token data is lost the moment the call returns.)
 
 Review prompt template:
 
