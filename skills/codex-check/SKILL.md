@@ -30,7 +30,7 @@ Overrides, strongest first: a model named in the invocation ("use sol", "on luna
 - Reviewer runs `--sandbox read-only`, always. **Never** pass `--dangerously-bypass-approvals-and-sandbox` or `--sandbox danger-full-access`. Codex never edits files; Claude makes all changes.
 - Never auto-apply reviewer suggestions. Judge every finding against the actual code first.
 - **One codex call total.** No resume, no rounds. Escalation happens through `/codex-debate`, not by extending this skill.
-- Run the `codex` command with the Bash tool `timeout` set to `300000` ms. On a hang, kill and retry once. For large diffs (roughly 1,000+ changed lines) a single pass can outlive a foreground call — use the detached launch + poll pattern from `codex-debate` step 3 instead.
+- Run the `codex` command with the Bash tool `timeout` set to `300000` ms. On a hang, kill and retry once. For large diffs (roughly 1,000+ changed lines) a single pass can outlive a foreground call — build `$RUN_DIR/round.input` (prompt + diff) and launch via the bundled `scripts/review-round.sh` (detached + poll; fails fast on an empty diff), then poll `$RUN_DIR/pid` and parse `$RUN_DIR/verdict.json`.
 - Scratch files live in a per-run `mktemp` dir — never fixed shared paths.
 - On a rate-limit/quota error, report it and stop.
 

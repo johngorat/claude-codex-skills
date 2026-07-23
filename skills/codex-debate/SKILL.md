@@ -63,22 +63,15 @@ Never send a diff to review that you already know is broken.
 
 Resolve `$MODEL` (see Model Selection) and the schema path: `SCHEMA=<skill dir>/review-schema.json`.
 
-Launch detached — the call returns immediately, the review keeps running on its own:
+Build the round input (review prompt first, then the diff), then launch via the bundled script — it owns the codex CLI contract and the detached launch; do not hand-write the codex command:
 
 ```bash
 git add -N .   # intent-to-add: new files show up in the diff
-git diff --unified=5 "$BASE" > "$RUN_DIR/round1.input"
-nohup codex exec \
-  -m "$MODEL" -c model_reasoning_effort=xhigh \
-  --sandbox read-only --json \
-  --output-schema "$SCHEMA" \
-  -o "$RUN_DIR/verdict.json" \
-  "<review prompt>" \
-  < "$RUN_DIR/round1.input" > "$RUN_DIR/events.jsonl" 2> "$RUN_DIR/stderr.log" &
-echo $! > "$RUN_DIR/pid"
+{ printf '%s\n\n' "<review prompt>"; git diff --unified=5 "$BASE"; } > "$RUN_DIR/round.input"
+bash "<skill dir>/scripts/review-round.sh" "$RUN_DIR" "$MODEL" xhigh "$SCHEMA"
 ```
 
-Then poll with short foreground calls every 1–2 minutes:
+The script fails fast on an empty `round.input` (an empty diff means there is nothing to review — stop, don't burn a quota pass). It returns immediately; poll with short foreground calls every 1–2 minutes:
 
 ```bash
 kill -0 "$(cat "$RUN_DIR/pid")" 2>/dev/null && echo running || echo finished
@@ -112,32 +105,17 @@ Project conventions (CLAUDE.md, docs/) outrank reviewer taste — convention con
 
 ### 5. Rounds 2..5 — resume the same thread
 
-`resume` does not take the same flags as `exec`, in two ways that both fail the
-command outright:
-
-- **every option must come before `SESSION_ID`** — the usage is
-  `codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]`, so an option after the id
-  is read as a positional argument;
-- **there is no `--sandbox` on `resume`** — set it with `-c sandbox_mode` instead.
-  The read-only rule still holds; it is passed as config, not as a flag.
+Same script, with the thread id as the fifth argument — that is what switches it
+to `codex exec resume` with the correct flag set (`resume` has no `--sandbox` and
+takes options only before the session id; the script owns those details):
 
 ```bash
 { printf '%s\n\n' "Round N reply. FIXED: <list>. REBUTTED (with evidence): <list>. Full updated diff follows."; \
-  git diff --unified=5 "$BASE"; } > "$RUN_DIR/roundN.input"
-nohup codex exec resume \
-  -m "$MODEL" \
-  -c model_reasoning_effort=xhigh \
-  -c sandbox_mode='"read-only"' \
-  --json \
-  --output-schema "$SCHEMA" \
-  -o "$RUN_DIR/verdict.json" \
-  "$THREAD_ID" - \
-  < "$RUN_DIR/roundN.input" > "$RUN_DIR/events.jsonl" 2> "$RUN_DIR/stderr.log" &
-echo $! > "$RUN_DIR/pid"
+  git diff --unified=5 "$BASE"; } > "$RUN_DIR/round.input"
+bash "<skill dir>/scripts/review-round.sh" "$RUN_DIR" "$MODEL" xhigh "$SCHEMA" "$THREAD_ID"
 ```
 
-The trailing `-` is the PROMPT argument and means "read the prompt from stdin";
-it must stay last, after the session id. Poll the same way as in step 3.
+Poll the same way as in step 3.
 
 On very large diffs (roughly 2,000+ changed lines) intermediate rounds may run
 `-c model_reasoning_effort=high` to stay inside a practical window — keep `xhigh`
