@@ -12,15 +12,22 @@ Companion: `ue-cocos-anchors-codex` (the anchor contract; read it before
 Stage 2).
 
 `/ue-cocos-port-codex <NS_system name> [context: where it plays, one-shot vs
-looping, attachment]` — build the staged plan first (codex-plan procedure: no
-pre-interview, decision points ship WITH the plan, expected review cost stated),
-get user approval, then execute stage by stage.
+looping, attachment]` — the entry flow, in order: (1) draft the staged plan
+(codex-plan procedure: no pre-interview, decision points ship WITH the plan,
+expected review cost stated); (2) run the Stage-0 `codex-check` on the plan doc
+and fold its findings in; (3) present the checked plan for USER approval;
+(4) only then execute stages 1–4. The Stage-0 check comes BEFORE approval — the
+user approves a reviewed plan, not a draft.
 
 ## Conventions this pack owns
 
 - **`docs/CODEX-LESSONS.md`** — the project's index of lesson sources and local
   check commands. Read FIRST when planning; every plan requirement traces to an
-  entry there, a past gate finding, or a dump.
+  entry there, a past gate finding, or a dump. The local check commands/skills
+  it names are BINDING throughout this pipeline: they must be green before
+  round 1 of every debate gate and re-run after fixes — this pack is the
+  "specialized skill naming specific checks" that the generic codex-debate
+  step 2 defers to.
 - **`docs/FX-GATE-PRECHECK.md`** — the pre-gate checklist. Walking it and
   writing the attestation block into the round-1 prompt is MANDATORY for every
   Stage-2/Stage-3 debate gate of this pipeline (this is the checklist the
