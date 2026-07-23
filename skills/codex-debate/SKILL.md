@@ -34,7 +34,8 @@ Always state the resolved model in the final report.
 - Reviewer runs `--sandbox read-only`, always. **Never** pass `--dangerously-bypass-approvals-and-sandbox` or `--sandbox danger-full-access`. Codex never edits files; Claude makes all changes.
 - Never auto-apply reviewer suggestions. Judge every finding against the actual code first; rebut false positives with evidence.
 - Max **5 review rounds**. A debated-and-unchanged diff is never re-submitted — if nothing changed since the last round, stop and report the divergence instead of looping.
-- Run every `codex` command with the Bash tool `timeout` set to `300000` ms. On a hang, kill and retry once.
+- Review rounds run **detached** (`nohup … &` + polling — see step 3). Never run a round in a foreground Bash call and never rely on the harness's background-task tracking: a review of a non-trivial diff legitimately outlives the foreground ceiling, and tracked background tasks have been observed killed within a minute. Foreground with `timeout: 300000` is only for quick probes and smoke tests.
+- Distinguish **overrun** from **hang**: while the events log grows, the round is working — wait, never retry (a retry burns a full quota pass to hit the same wall). No event growth for 10 minutes = hang → kill, retry once.
 - On a rate-limit/quota error (rolling 5-hour window), stop the loop, surface whatever `remaining`/`resetsAt` info the error JSONL carries, and tell the user.
 - All scratch files live in the per-run `$RUN_DIR` created in step 1. **Never use fixed shared paths** (e.g. `/tmp/codex-debate-*.json`) — concurrent debates in different sessions on the same machine would clobber each other's verdicts.
 
@@ -62,15 +63,29 @@ Never send a diff to review that you already know is broken.
 
 Resolve `$MODEL` (see Model Selection) and the schema path: `SCHEMA=<skill dir>/review-schema.json`.
 
+Launch detached — the call returns immediately, the review keeps running on its own:
+
 ```bash
 git add -N .   # intent-to-add: new files show up in the diff
-git diff --unified=5 "$BASE" | codex exec \
+git diff --unified=5 "$BASE" > "$RUN_DIR/round1.input"
+nohup codex exec \
   -m "$MODEL" -c model_reasoning_effort=xhigh \
   --sandbox read-only --json \
   --output-schema "$SCHEMA" \
   -o "$RUN_DIR/verdict.json" \
-  "<review prompt>" | tee "$RUN_DIR/events.jsonl" | tail -3
+  "<review prompt>" \
+  < "$RUN_DIR/round1.input" > "$RUN_DIR/events.jsonl" 2> "$RUN_DIR/stderr.log" &
+echo $! > "$RUN_DIR/pid"
 ```
+
+Then poll with short foreground calls every 1–2 minutes:
+
+```bash
+kill -0 "$(cat "$RUN_DIR/pid")" 2>/dev/null && echo running || echo finished
+wc -c "$RUN_DIR/events.jsonl"    # growing = working (overrun is normal); static for 10 min = hang
+```
+
+On `finished`, check `verdict.json` is non-empty before parsing; if the process died early, read `stderr.log` and the tail of `events.jsonl` for the error.
 
 Review prompt template:
 
@@ -108,18 +123,26 @@ command outright:
 
 ```bash
 { printf '%s\n\n' "Round N reply. FIXED: <list>. REBUTTED (with evidence): <list>. Full updated diff follows."; \
-  git diff --unified=5 "$BASE"; } | codex exec resume \
+  git diff --unified=5 "$BASE"; } > "$RUN_DIR/roundN.input"
+nohup codex exec resume \
   -m "$MODEL" \
   -c model_reasoning_effort=xhigh \
   -c sandbox_mode='"read-only"' \
   --json \
   --output-schema "$SCHEMA" \
   -o "$RUN_DIR/verdict.json" \
-  "$THREAD_ID" - | tail -3
+  "$THREAD_ID" - \
+  < "$RUN_DIR/roundN.input" > "$RUN_DIR/events.jsonl" 2> "$RUN_DIR/stderr.log" &
+echo $! > "$RUN_DIR/pid"
 ```
 
 The trailing `-` is the PROMPT argument and means "read the prompt from stdin";
-it must stay last, after the session id.
+it must stay last, after the session id. Poll the same way as in step 3.
+
+On very large diffs (roughly 2,000+ changed lines) intermediate rounds may run
+`-c model_reasoning_effort=high` to stay inside a practical window — keep `xhigh`
+for the final gate round. If a single pass is still impractical, chunk the review
+by file groups within the same thread via `resume`.
 
 ### 6. Terminate
 
@@ -138,6 +161,10 @@ Default effort is `xhigh`. For a final gate on a risky change, one round at `-c 
 - `error: unexpected argument '--sandbox' found` on round 2 → the resume call put
   options after `SESSION_ID`, or passed `--sandbox`, which `resume` does not have.
   See step 5: options first, `-c sandbox_mode='"read-only"'`, id and `-` last.
+- Round killed exactly at the Bash timeout, or a harness-tracked background run
+  dies within ~a minute leaving a 39-byte events log → it was run foreground or
+  harness-tracked. Relaunch detached per step 3 (`nohup … &` + poll). A growing
+  events log is an overrun, not a hang — wait, don't retry.
 - `codex login status` prints to **stderr** — check both streams for "Logged in".
 - 401 `require_sso_login` → `codex logout && codex login`.
 - "model requires a newer version of Codex" → `npm install -g @openai/codex@latest`.

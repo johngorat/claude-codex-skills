@@ -167,3 +167,5 @@ why, or — on deadlock — both sides' positions so you can decide.
 | 401 `require_sso_login` | `codex logout && codex login` |
 | "model requires a newer version of Codex" | `npm install -g @openai/codex@latest` |
 | Rate-limit mid-debate | Plan quota (rolling 5-hour window) exhausted — the loop stops cleanly; retry later |
+| Review of a big diff dies at the Bash timeout; background run killed in ~a minute | Run the round detached (`nohup … &`) and poll its events log — `codex-debate` step 3. A growing log means it's working: wait, don't retry |
+| Round 2+ fails with `unexpected argument '--sandbox'` | `codex exec resume` takes options **before** the session id and has no `--sandbox` — use `-c sandbox_mode='"read-only"'` (see `codex-debate` step 5) |

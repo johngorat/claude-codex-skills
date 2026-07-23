@@ -11,6 +11,8 @@ description: Turn a substantial multi-stage task into a staged, gate-reviewed ex
 
 The plan is the deliverable of the first step. Never start implementing before the user has seen and approved it.
 
+**No pre-interview.** Steps 1–6 are autonomous document work — do them without asking the user anything. Questions that come up while drafting go INTO the plan as marked decision points and are asked together with the plan presentation: one consolidated approval round, not a conversation before the work starts.
+
 ## Procedure
 
 ### 1. Classify the ground
@@ -49,6 +51,8 @@ Any choice only the owner can make (policy trade-offs, deliberate divergences fr
 ### 7. Present, then execute
 
 Show the plan. After approval, execute stage by stage; after each gate report rounds used, findings fixed/rebutted, and the reviewer model. If reality diverges from the plan (escalations, new ground discovered), say so at the moment it happens, not in the final report.
+
+**Gate execution means invoking the `/codex-debate` or `/codex-check` skill** for that stage — load the skill and follow its protocol. Never substitute an ad-hoc codex CLI call: in particular `codex review` / `codex exec review` is OpenAI's own separate review flow — it bypasses the round protocol, the verdict schema, the model selection, and the sandbox rules, and does NOT count as a gate.
 
 ## Plan quality bar
 
