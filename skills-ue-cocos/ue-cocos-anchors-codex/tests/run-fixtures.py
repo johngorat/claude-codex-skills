@@ -9,14 +9,16 @@ into a mktemp dir. Placeholders __KIND_REGISTRY_SHA__ / __ANCHORS_SHA256__ are
 resolved at run time against the actual registry / materialized anchors file,
 so fixtures never go stale when the registry grows.
 
-The S105 regression (real gated v1 file, external to this public repo because
-it carries a consumer project's FX internals) asserts the script's output is
-byte-identical to the pre-change baseline captured in tests/baselines/ — the
-executable proof of contract-v1.1 backward readability. Its location comes
-ONLY from $S105_ANCHORS (no baked-in default: personal/machine paths stay out
-of this public repo). Unset or missing FAILS the suite: gates need this
-evidence. The only opt-out is the explicit ALLOW_MISSING_S105_REGRESSION=1,
-which still prints a loud notice and is itself a finding at any gate.
+The external regression (a real gated v1 anchors file) asserts the script's
+output is byte-identical to baselines captured from the pre-change script —
+the executable proof of contract-v1.1 backward readability. The WHOLE bundle
+(anchors, runtime, baseline-time input pins, output baselines) lives OUTSIDE
+this public repo: it carries a consumer project's internals, and neither
+personal/machine paths nor exact project file names are ever committed here.
+Location comes ONLY from $REGRESSION_ANCHORS; sibling files are derived from
+it. Unset or missing FAILS the suite: gates need this evidence. The only
+opt-out is the explicit ALLOW_MISSING_EXTERNAL_REGRESSION=1, which still
+prints a loud notice and is itself a finding at any gate.
 """
 import hashlib
 import json
@@ -30,8 +32,7 @@ SKILL = os.path.dirname(HERE)
 SCRIPT = os.path.join(SKILL, "scripts", "ue-cocos-anchors-codex.py")
 REGISTRY = os.path.join(SKILL, "kind-registry.json")
 FIXTURES = os.path.join(HERE, "fixtures")
-BASELINES = os.path.join(HERE, "baselines")
-S105 = os.environ.get("S105_ANCHORS")  # no default: the artifacts live outside this public repo
+REG = os.environ.get("REGRESSION_ANCHORS")  # no default: the bundle lives outside this public repo
 
 WRONG_SHA = "0" * 64
 registry_sha = hashlib.sha256(open(REGISTRY, "rb").read()).hexdigest()
@@ -259,80 +260,84 @@ case("render-check-current", ["render", v11_ok, "--check", table], 0,
 case("render-subject-header", ["render", v11_subject], 0,
      contains=["### Anchors — M_test_material (T001)"])
 
-# ---- S105 regression: byte-identical to the pre-change baseline -------------
-def s105_inputs_pinned():
+# ---- external regression: byte-identical to the pre-change baselines --------
+# The bundle lives next to the private anchors file; siblings derive from its
+# path (base = path minus .json): <base>.runtime.json, <base>.inputs.sha256
+# (baseline-time pins), <base>.baseline-validate.txt, <base>.baseline-compare.txt.
+REG_BASE = REG[: -len(".json")] if REG else None
+REG_RUNTIME = REG_BASE + ".runtime.json" if REG else None
+
+
+def regression_inputs_pinned():
     """The baselines are only meaningful against the EXACT external inputs they
     were captured from — verify both files against their pinned sha256 before
     trusting a byte-identical output (path existence alone would let edited or
     rebound inputs claim regression coverage falsely)."""
     global n_pass, n_fail
     pins = {}
-    for line in open(os.path.join(BASELINES, "s105-inputs.sha256"), encoding="utf-8"):
+    for line in open(REG_BASE + ".inputs.sha256", encoding="utf-8"):
         sha, role = line.split()
         pins[role] = sha
     ok = True
-    for role, path in (("anchors", S105), ("runtime", S105_RUNTIME)):
+    for role, path in (("anchors", REG), ("runtime", REG_RUNTIME)):
         try:
             actual = hashlib.sha256(open(path, "rb").read()).hexdigest()
         except OSError as e:
             ok = False
             n_fail += 1
-            print(f"FAIL s105-input-pin ({role}) — unreadable: {e}")
+            print(f"FAIL external-input-pin ({role}) — unreadable: {e}")
             continue
         if actual != pins[role]:
             ok = False
             n_fail += 1
-            print(f"FAIL s105-input-pin ({role}) — {path} sha256 {actual[:16]}… does not "
+            print(f"FAIL external-input-pin ({role}) — {path} sha256 {actual[:16]}… does not "
                   f"match the baseline-time pin {pins[role][:16]}… from "
-                  f"baselines/s105-inputs.sha256; the committed baselines prove nothing "
-                  f"about this file. Re-capture baselines from a PRE-change script only.")
+                  f"{REG_BASE}.inputs.sha256; the baselines prove nothing about this "
+                  f"file. Re-capture baselines from a PRE-change script only.")
     if ok:
         n_pass += 1
-        print("PASS s105-input-pin")
+        print("PASS external-input-pin")
     return ok
 
 
-S105_RUNTIME = S105[: -len(".json")] + ".runtime.json" if S105 else None
-if not S105:
-    missing = "$S105_ANCHORS (unset)"
-elif not os.path.isfile(S105):
-    missing = S105
-elif not os.path.isfile(S105_RUNTIME):
-    missing = S105_RUNTIME
+if not REG:
+    missing = "$REGRESSION_ANCHORS (unset)"
+elif not os.path.isfile(REG):
+    missing = REG
+elif not os.path.isfile(REG_RUNTIME):
+    missing = REG_RUNTIME
 else:
     missing = None
 if missing:
-    where = missing
-    if os.environ.get("ALLOW_MISSING_S105_REGRESSION") == "1":
-        print(f"SKIP s105-regression — {where} not available; explicitly waived via "
-              f"ALLOW_MISSING_S105_REGRESSION=1. LOUD NOTICE: backward-compatibility "
+    if os.environ.get("ALLOW_MISSING_EXTERNAL_REGRESSION") == "1":
+        print(f"SKIP external-regression — {missing} not available; explicitly waived via "
+              f"ALLOW_MISSING_EXTERNAL_REGRESSION=1. LOUD NOTICE: backward-compatibility "
               f"is NOT proven on this machine; any gate treats this waiver as a finding.")
     else:
         n_fail += 1
-        print(f"FAIL s105-regression — {where} not available and no explicit waiver. "
-              f"Point $S105_ANCHORS at the gated S105 anchors file (its .runtime.json "
-              f"must sit next to it; the pair is kept OUTSIDE this public repo), or — "
-              f"outside gate runs only — set ALLOW_MISSING_S105_REGRESSION=1. A silent "
-              f"skip here would let a clean clone report green without the "
-              f"backward-compat proof.")
-elif s105_inputs_pinned():
-    # pin failures are already counted inside s105_inputs_pinned()
-    for label, args, base in (
-            ("s105-validate-regression", ["validate", S105, "--no-harvest"],
-             "s105-validate.txt"),
-            ("s105-compare-regression",
-             ["compare", S105, S105[: -len(".json")] + ".runtime.json"],
-             "s105-compare.txt")):
+        print(f"FAIL external-regression — {missing} not available and no explicit waiver. "
+              f"Point $REGRESSION_ANCHORS at the gated anchors file of the external "
+              f"regression bundle (siblings derived from its path; the bundle is kept "
+              f"OUTSIDE this public repo), or — outside gate runs only — set "
+              f"ALLOW_MISSING_EXTERNAL_REGRESSION=1. A silent skip here would let a "
+              f"clean clone report green without the backward-compat proof.")
+elif regression_inputs_pinned():
+    # pin failures are already counted inside regression_inputs_pinned()
+    for label, args, baseline_path in (
+            ("external-validate-regression", ["validate", REG, "--no-harvest"],
+             REG_BASE + ".baseline-validate.txt"),
+            ("external-compare-regression", ["compare", REG, REG_RUNTIME],
+             REG_BASE + ".baseline-compare.txt")):
         code, out = run(args)
-        expected = open(os.path.join(BASELINES, base), encoding="utf-8").read()
+        expected = open(baseline_path, encoding="utf-8").read()
         actual = out + f"exit={code}\n"
         if actual == expected:
             n_pass += 1
             print(f"PASS {label}")
         else:
             n_fail += 1
-            print(f"FAIL {label} — output differs from pre-change baseline "
-                  f"{base}; v1 behavior MUST be byte-identical (contract v1.1 "
+            print(f"FAIL {label} — output differs from the pre-change baseline "
+                  f"{baseline_path}; v1 behavior MUST be byte-identical (contract v1.1 "
                   f"is backward-readable by design)")
 
 print(f"\n{n_pass} passed, {n_fail} failed (fixtures in {TMP})")

@@ -164,8 +164,9 @@ is falsifying the test — same severity as the visual-verdict ban.
 - This skill owns: the schema, the kind registry (`kind-registry.json` —
   extended only through gated edits), the validator/comparator/renderer
   script, the fixture suite (`tests/run-fixtures.py` — run it after ANY script
-  or registry change; the S105 baseline regression proves v1 files stay
-  byte-identically valid), the file naming, the rules above.
+  or registry change; the external baseline regression, wired via
+  `$REGRESSION_ANCHORS`, proves v1 files stay byte-identically valid), the
+  file naming, the rules above.
 - The project owns: the runtime probe (engine-specific — it knows how to read
   particle buffers, material uniforms, pass states) and the per-FX anchor files.
   The probe is infrastructure: its first version goes through a full
