@@ -1,0 +1,9 @@
+{
+  "contract": "ue-cocos-anchors-codex-runtime/v1",
+  "subject": "M_test_material",
+  "sessionId": "T001",
+  "anchorsSha256": "__ANCHORS_SHA256__",
+  "samples": [
+    {"id": "mat.base.opacity", "actual": 0.752}
+  ]
+}

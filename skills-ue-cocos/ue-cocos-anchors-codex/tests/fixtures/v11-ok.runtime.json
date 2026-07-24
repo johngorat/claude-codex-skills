@@ -1,0 +1,10 @@
+{
+  "contract": "ue-cocos-anchors-codex-runtime/v1",
+  "fx": "NS_test_mini",
+  "sessionId": "T001",
+  "anchorsSha256": "__ANCHORS_SHA256__",
+  "samples": [
+    {"id": "em1.spawn.count.early", "actual": 12},
+    {"id": "em1.spawn.count.late", "actual": 12}
+  ]
+}

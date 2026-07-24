@@ -35,12 +35,40 @@ Plus `at` (cycleTime or deterministic tick), `expected`, `tolerance`
 `dd: {"id": "DD-n", "approvedBy": "USER"}` — the ONLY legitimate representation
 of a deliberate divergence (compare reports it as DD, never as PASS or FAIL).
 
+**Contract versions.** Two are accepted: `…/v1` (bare kinds, implied family
+`fx`) and `…/v1.1` (PORT-V2 generalization): kinds are namespaced
+`family.kind`; `subject` is accepted as an alias of `fx` (exactly one, never
+both); `kindRegistrySha` — the sha256 of the pack's `kind-registry.json` — is
+REQUIRED and checked by validate AND compare (same discipline as
+`--approved-sha`: a vocabulary change after authoring is a re-gate, not a
+warning); a declared loop carries `mode: resetting | accumulating`,
+script-derived from dump fields, never author-chosen (`accumulating` is
+rejected until the animations family profile implements its seam-continuity
+semantics).
+
+**The kind registry** (`kind-registry.json`, machine-readable) is the single
+source for the kind vocabulary: per kind it owns the space/field requirements
+and unit conventions the validator enforces. Unknown family or kind = FAIL; a
+missing or malformed registry fails closed. Builtin kinds are non-overridable
+— family profiles ADD kinds through gated edits of the registry, never
+redefine existing entries. v1 files are validated against the same registry
+under the implied `fx` family.
+
+**Registry trust boundary.** Gates run against the PACK registry only —
+`kindRegistrySha` proves binding to the registry in use, and only the
+pack-relative default makes that the current vocabulary. `--kind-registry` is
+a diagnostic/test injection path: validate marks its output `CUSTOM REGISTRY`
+(a gate finding, like `--no-harvest`), compare refuses it together with
+`--approved-sha`, render refuses it outright. Pointing an old registry copy
+at an already-approved file to dodge a re-gate is exactly what this blocks.
+
 Hard rules the validator enforces beyond structure: NaN/Infinity rejected
-everywhere; bool is never a number; spatial kinds require `space`;
-field-addressed kinds (`material_uniform`, `pass_state`, `texture_binding`)
-require `field`; two anchors may not share a (node, kind, field, space, at)
-address; declared loops must have cycleTime anchors observing BOTH sides of the
-seam (one in the first quarter, one in the last quarter of the period).
+everywhere; bool is never a number; kinds the registry marks `requiresSpace`
+require `space`; kinds it marks `requiresField` (`material_uniform`,
+`pass_state`, `texture_binding`) require `field`; two anchors may not share a
+(node, kind, field, space, at) address; declared loops must have cycleTime
+anchors observing BOTH sides of the seam (one in the first quarter, one in
+the last quarter of the period).
 
 **Binding.** The runtime file must carry `fx`, `sessionId`, and `anchorsSha256`
 (sha256 of the anchors file bytes) matching the anchors file — the comparator
@@ -80,7 +108,9 @@ expose thin spots — evidence FOR that review, not a substitute.
 2. `python3 "<skill dir>/scripts/ue-cocos-anchors-codex.py" validate <anchors.json> --harvest-root <harvest dir>` —
    must be VALID before the Stage-2 review round 1 (unique ids, tolerance types,
    loop-seam coverage from both sides, no bool-as-number, no NaN/Infinity, every
-   source.file present in the harvest).
+   source.file present in the harvest, every kind in the registry). The Stage-2
+   gate report RECORDS both shas: the approved anchors file's sha256 AND the
+   `kindRegistrySha` it embeds.
 3. The human-readable anchor table in the value authority document is
    **generated**: `... render <anchors.json> -o <section file>` — never written
    or edited by hand. The generated header embeds the anchors sha256;
@@ -131,8 +161,11 @@ is falsifying the test — same severity as the visual-verdict ban.
 
 ## Division of labor
 
-- This skill owns: the schema, the validator/comparator/renderer script, the
-  file naming, the rules above.
+- This skill owns: the schema, the kind registry (`kind-registry.json` —
+  extended only through gated edits), the validator/comparator/renderer
+  script, the fixture suite (`tests/run-fixtures.py` — run it after ANY script
+  or registry change; the S105 baseline regression proves v1 files stay
+  byte-identically valid), the file naming, the rules above.
 - The project owns: the runtime probe (engine-specific — it knows how to read
   particle buffers, material uniforms, pass states) and the per-FX anchor files.
   The probe is infrastructure: its first version goes through a full

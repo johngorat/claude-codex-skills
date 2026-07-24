@@ -1,0 +1,25 @@
+{
+  "contract": "ue-cocos-anchors-codex/v1",
+  "fx": "NS_test_mini",
+  "sessionId": "T001",
+  "anchors": [
+    {
+      "id": "em1.spawn.count",
+      "source": {"file": "dump.json", "path": "$.emitters[0].spawnCount"},
+      "target": {"kind": "particle_count", "node": "TestFx/em1", "space": "world"},
+      "at": {"tick": 0},
+      "expected": 12,
+      "tolerance": {"abs": 0},
+      "units": "count"
+    },
+    {
+      "id": "em1.mat.opacity",
+      "source": {"file": "dump.json", "path": "$.materials[0].opacity"},
+      "target": {"kind": "material_uniform", "node": "TestFx/em1", "field": "u_opacity"},
+      "at": {"tick": 0},
+      "expected": 0.5,
+      "tolerance": {"abs": 0.01},
+      "units": "0..1"
+    }
+  ]
+}

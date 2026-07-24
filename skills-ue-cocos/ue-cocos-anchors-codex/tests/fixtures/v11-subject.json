@@ -1,0 +1,17 @@
+{
+  "contract": "ue-cocos-anchors-codex/v1.1",
+  "subject": "M_test_material",
+  "sessionId": "T001",
+  "kindRegistrySha": "__KIND_REGISTRY_SHA__",
+  "anchors": [
+    {
+      "id": "mat.base.opacity",
+      "source": {"file": "dump.json", "path": "$.materials[0].opacity"},
+      "target": {"kind": "fx.material_uniform", "node": "TestMat/quad", "field": "u_opacity"},
+      "at": {"tick": 0},
+      "expected": 0.75,
+      "tolerance": {"abs": 0.01},
+      "units": "0..1"
+    }
+  ]
+}

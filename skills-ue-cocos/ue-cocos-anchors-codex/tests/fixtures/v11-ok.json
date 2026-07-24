@@ -1,0 +1,27 @@
+{
+  "contract": "ue-cocos-anchors-codex/v1.1",
+  "fx": "NS_test_mini",
+  "sessionId": "T001",
+  "kindRegistrySha": "__KIND_REGISTRY_SHA__",
+  "loop": {"periodSec": 2.0, "mode": "resetting"},
+  "anchors": [
+    {
+      "id": "em1.spawn.count.early",
+      "source": {"file": "dump.json", "path": "$.emitters[0].spawnCount"},
+      "target": {"kind": "fx.particle_count", "node": "TestFx/em1", "space": "world"},
+      "at": {"cycleTime": 0.1},
+      "expected": 12,
+      "tolerance": {"abs": 0},
+      "units": "count"
+    },
+    {
+      "id": "em1.spawn.count.late",
+      "source": {"file": "dump.json", "path": "$.emitters[0].spawnCount"},
+      "target": {"kind": "fx.particle_count", "node": "TestFx/em1", "space": "world"},
+      "at": {"cycleTime": 1.9},
+      "expected": 12,
+      "tolerance": {"abs": 0},
+      "units": "count"
+    }
+  ]
+}

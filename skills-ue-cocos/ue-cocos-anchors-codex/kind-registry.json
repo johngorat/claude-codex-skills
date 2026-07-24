@@ -1,0 +1,86 @@
+{
+  "registry": "ue-cocos-anchors-codex-kinds/v1",
+  "note": "Machine-readable kind vocabulary for the anchor contract (PORT-V2 design section 1). The validator loads this file and records/checks its sha256 via 'kindRegistrySha' in v1.1 anchors files. Builtin kinds are NON-OVERRIDABLE: family profiles ADD kinds through gated edits of this file, never redefine existing entries. 'unitsAllowed', when present, is enforced; 'toleranceNote' is convention documentation (the validator's numeric/exact rules remain the executable authority).",
+  "families": {
+    "fx": {
+      "description": "Niagara FX ports. v1 anchors files (unnamespaced kinds) imply this family.",
+      "kinds": {
+        "particle_count": {
+          "requiresSpace": true,
+          "requiresField": false,
+          "unitsAllowed": ["count"],
+          "toleranceNote": "numeric abs (integer counts)",
+          "description": "live particle count on the node at the sample time"
+        },
+        "particle_bbox": {
+          "requiresSpace": true,
+          "requiresField": false,
+          "unitsAllowed": ["m"],
+          "toleranceNote": "numeric abs/rel per component",
+          "description": "axis-aligned bounding box of the particle buffer"
+        },
+        "particle_centroid": {
+          "requiresSpace": true,
+          "requiresField": false,
+          "unitsAllowed": ["m"],
+          "toleranceNote": "numeric abs/rel per component",
+          "description": "mean particle position"
+        },
+        "particle_radial_range": {
+          "requiresSpace": true,
+          "requiresField": false,
+          "unitsAllowed": ["m"],
+          "toleranceNote": "numeric abs/rel",
+          "description": "min/max radial distance of particles from the emitter origin"
+        },
+        "particle_angular_distinct": {
+          "requiresSpace": true,
+          "requiresField": false,
+          "unitsAllowed": ["count"],
+          "toleranceNote": "numeric abs (integer counts)",
+          "description": "number of distinct angular clusters in the particle distribution"
+        },
+        "particle_angular_max_gap": {
+          "requiresSpace": true,
+          "requiresField": false,
+          "unitsAllowed": ["deg"],
+          "toleranceNote": "numeric abs",
+          "description": "largest angular gap between neighboring particles"
+        },
+        "particle_motion_conformance": {
+          "requiresSpace": true,
+          "requiresField": false,
+          "unitsAllowed": ["deviation"],
+          "toleranceNote": "numeric abs",
+          "description": "deviation of observed particle motion from the declared motion model"
+        },
+        "material_uniform": {
+          "requiresSpace": false,
+          "requiresField": true,
+          "toleranceNote": "numeric abs/rel; strings (enums) exact",
+          "description": "material uniform value; 'field' = uniform name (units vary by uniform: 0..1, coeff, factor, linear-rgb, m, m/s, s, uv, deg, enum, ...)"
+        },
+        "pass_state": {
+          "requiresSpace": false,
+          "requiresField": true,
+          "unitsAllowed": ["enum", "flag"],
+          "toleranceNote": "exact (strings/bools)",
+          "description": "render pass state; 'field' = state name (blendSrc, depthWrite, ...)"
+        },
+        "texture_binding": {
+          "requiresSpace": false,
+          "requiresField": true,
+          "unitsAllowed": ["texture"],
+          "toleranceNote": "exact (asset identity string)",
+          "description": "texture bound to a sampler slot; 'field' = slot/sampler name"
+        },
+        "sort_priority": {
+          "requiresSpace": false,
+          "requiresField": false,
+          "toleranceNote": "numeric abs or exact",
+          "description": "render sort priority of the node relative to sibling FX"
+        }
+      }
+    }
+  }
+}

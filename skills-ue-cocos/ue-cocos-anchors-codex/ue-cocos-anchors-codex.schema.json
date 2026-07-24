@@ -1,19 +1,23 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "ue-cocos-anchors-codex/v1 — anchor contract for UE→Cocos FX ports",
-  "description": "Documentation schema. The executable authority is scripts/ue-cocos-anchors-codex.py validate, which implements these rules plus semantic checks (unique ids, tolerance-type consistency, loop-seam coverage, bool-is-not-a-number).",
+  "title": "ue-cocos-anchors-codex — anchor contract for UE→Cocos ports (v1 and v1.1)",
+  "description": "Documentation schema. The executable authority is scripts/ue-cocos-anchors-codex.py validate, which implements these rules plus semantic checks (unique ids, tolerance-type consistency, loop-seam coverage, bool-is-not-a-number, kind-registry validation with kindRegistrySha binding). v1 files imply the 'fx' family for every kind; v1.1 files use namespaced 'family.kind' kinds, may name the ported entity via 'subject' instead of 'fx', and MUST record the sha256 of the pack's kind-registry.json in 'kindRegistrySha'.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract", "fx", "sessionId", "anchors"],
+  "required": ["contract", "sessionId", "anchors"],
   "properties": {
-    "contract": { "const": "ue-cocos-anchors-codex/v1" },
-    "fx": { "type": "string", "minLength": 1, "description": "Niagara system name, e.g. NS_example_glow" },
+    "contract": { "enum": ["ue-cocos-anchors-codex/v1", "ue-cocos-anchors-codex/v1.1"] },
+    "fx": { "type": "string", "minLength": 1, "description": "Ported entity name, e.g. NS_example_glow. In v1.1 'subject' is an accepted alias — exactly one of the two, never both." },
+    "subject": { "type": "string", "minLength": 1, "description": "v1.1 only: alias of 'fx' for non-FX families (materials, meshes, animations)." },
     "sessionId": { "type": "string", "minLength": 1, "description": "Project session id, e.g. S103" },
+    "kindRegistrySha": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "v1.1 only (required there): lowercase sha256 of the kind-registry.json in use. validate AND compare fail on mismatch — same discipline as --approved-sha." },
     "loop": {
       "type": ["object", "null"],
-      "additionalProperties": false,
       "required": ["periodSec"],
-      "properties": { "periodSec": { "type": "number", "exclusiveMinimum": 0 } }
+      "properties": {
+        "periodSec": { "type": "number", "exclusiveMinimum": 0 },
+        "mode": { "const": "resetting", "description": "v1.1 only (required there when 'loop' is present); script-derived from dump fields, never author-chosen. The contract vocabulary is resetting|accumulating, but 'accumulating' is rejected by schema AND validator until the animations family profile implements its seam-continuity semantics (PORT-V2 phase 4) — this const widens to the enum then." }
+      }
     },
     "anchors": {
       "type": "array",
@@ -43,10 +47,10 @@
             "additionalProperties": false,
             "required": ["kind", "node"],
             "properties": {
-              "kind": { "type": "string", "minLength": 1, "description": "What the probe samples: particle_count, particle_bbox, particle_centroid, material_uniform, pass_state, texture_binding, sort_priority, ..." },
+              "kind": { "type": "string", "minLength": 1, "description": "What the probe samples. v1: bare kind, implied family 'fx' (particle_count, material_uniform, pass_state, ...). v1.1: namespaced 'family.kind' (fx.particle_count, ...). Every kind must exist in the pack's kind-registry.json, which also owns space/field requirements and unit conventions — unknown family or kind is a FAIL." },
               "node": { "type": "string", "minLength": 1, "description": "Cocos scene address, e.g. ExampleFx/dust" },
-              "space": { "type": "string", "enum": ["world", "local"], "description": "Required for spatial kinds; Local buffers must be transformed through the node's world matrix by the probe" },
-              "field": { "type": "string", "description": "Sub-field selector, e.g. uniform name or blendSrc" },
+              "space": { "type": "string", "enum": ["world", "local"], "description": "Required for kinds the registry marks requiresSpace; Local buffers must be transformed through the node's world matrix by the probe" },
+              "field": { "type": "string", "description": "Sub-field selector, e.g. uniform name or blendSrc; required for kinds the registry marks requiresField" },
               "extra": { "type": "object", "description": "Probe-specific parameters" }
             }
           },
@@ -77,7 +81,7 @@
             },
             "description": "Numeric expected: abs and/or rel (pass if within either). String/bool expected: {\"exact\": true}."
           },
-          "units": { "type": "string", "minLength": 1, "description": "m, m/s, 0..1, count, enum, flag, ..." },
+          "units": { "type": "string", "minLength": 1, "description": "m, m/s, 0..1, count, enum, flag, ... — kinds with a registry 'unitsAllowed' list are held to it" },
           "dd": {
             "type": "object",
             "additionalProperties": false,
@@ -92,5 +96,26 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "contract": { "const": "ue-cocos-anchors-codex/v1" } } },
+      "then": {
+        "required": ["fx"],
+        "not": { "anyOf": [ { "required": ["subject"] }, { "required": ["kindRegistrySha"] } ] },
+        "properties": { "loop": { "type": ["object", "null"], "additionalProperties": false, "required": ["periodSec"], "properties": { "periodSec": {} } } }
+      }
+    },
+    {
+      "if": { "properties": { "contract": { "const": "ue-cocos-anchors-codex/v1.1" } } },
+      "then": {
+        "required": ["kindRegistrySha"],
+        "oneOf": [
+          { "required": ["fx"], "not": { "required": ["subject"] } },
+          { "required": ["subject"], "not": { "required": ["fx"] } }
+        ],
+        "properties": { "loop": { "type": ["object", "null"], "additionalProperties": false, "required": ["periodSec", "mode"], "properties": { "periodSec": {}, "mode": {} } } }
+      }
+    }
+  ]
 }
