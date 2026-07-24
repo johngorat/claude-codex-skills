@@ -45,10 +45,30 @@ user approves a reviewed plan, not a draft.
 | 1 | Harvest: gated dumper, validator inheriting the hardened checks, enum library before fresh dumps | `codex-check`; a dumper EXTENSION is infrastructure → its diff alone gets a full `codex-debate` gate |
 | 2 | Value authority (`docs/design/mechanics/fx_<name>_values_<sid>.md`) extending the template — never forking it — plus the anchors file authored at translation time (`target` = the translation decision as data); `validate --harvest-root` VALID, table GENERATED + `render --check` CURRENT | full `codex-debate`, top model; the gate report RECORDS the approved anchors sha256 |
 | 3 | Implementation + runtime probe, ONE combined gate (impl-vs-spec AND probe-vs-spec). Probe reads the anchors file, emits the bound runtime file; `compare --approved-sha <recorded sha>` → GATED, zero unexplained FAILs; determinism A/B per the project manual. The FIRST version of the probe is itself infrastructure → its own debate gate | full `codex-debate`; focus the review prompt on lifecycle, attachment, and timing — NOT on material math already gated in earlier ports |
-| 4 | Production wiring | `codex-check` |
+| 4 | Production wiring, verified by a THIN production probe (see Probe & build economy) | `codex-check` |
 
 Escalation everywhere: a check leaving a `blocker`/`major` standing upgrades
 that stage to a debate.
+
+## Probe & build economy (binding)
+
+The expensive scene is a measurement instrument, not a development environment:
+
+- **Develop and debug every probe against the demo scene** (builds in seconds).
+  Probe bugs are probe-side — they never justify rebuilding the expensive
+  target. The production/main scene is built **ONCE per gate**, for the final
+  measurement run, plus at most one more run where the project's determinism
+  standard requires an A/B pair. Iterating a probe against main-scene builds
+  (10–20 min each on a reference laptop) burns an hour of wall-clock and
+  thermal budget per handful of iterations for zero information gain.
+- **The Stage-4 production anchor set is THIN**: integration checks — trigger
+  hooks (ALL live invocation paths), attachment on real units, sort priorities
+  vs existing FX, anti-stomp — plus on the order of ten sentinel anchors.
+  Never the full Stage-3 battery: Stage-3 already gated the numbers on the
+  demo scene; Stage-4 verifies the WIRING, and the USER's demo approval covers
+  the look, not the wiring.
+- Batch fixes between expensive runs: one rebuild carries every accumulated
+  change, not one rebuild per tweak.
 
 ## Effect-type notes (set these in the plan)
 
