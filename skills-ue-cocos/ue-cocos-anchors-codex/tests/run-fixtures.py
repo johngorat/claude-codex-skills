@@ -12,11 +12,11 @@ so fixtures never go stale when the registry grows.
 The S105 regression (real gated v1 file, external to this public repo because
 it carries a consumer project's FX internals) asserts the script's output is
 byte-identical to the pre-change baseline captured in tests/baselines/ — the
-executable proof of contract-v1.1 backward readability. Its path comes from
-$S105_ANCHORS (default: the reference workstation location). A missing file
-FAILS the suite: gates need this evidence. The only opt-out is the explicit
-ALLOW_MISSING_S105_REGRESSION=1, which still prints a loud notice and is
-itself a finding at any gate.
+executable proof of contract-v1.1 backward readability. Its location comes
+ONLY from $S105_ANCHORS (no baked-in default: personal/machine paths stay out
+of this public repo). Unset or missing FAILS the suite: gates need this
+evidence. The only opt-out is the explicit ALLOW_MISSING_S105_REGRESSION=1,
+which still prints a loud notice and is itself a finding at any gate.
 """
 import hashlib
 import json
@@ -31,10 +31,7 @@ SCRIPT = os.path.join(SKILL, "scripts", "ue-cocos-anchors-codex.py")
 REGISTRY = os.path.join(SKILL, "kind-registry.json")
 FIXTURES = os.path.join(HERE, "fixtures")
 BASELINES = os.path.join(HERE, "baselines")
-S105 = os.environ.get(
-    "S105_ANCHORS",
-    "<external>/"
-    "external_fixture.ue-cocos-anchors-codex.json")
+S105 = os.environ.get("S105_ANCHORS")  # no default: the artifacts live outside this public repo
 
 WRONG_SHA = "0" * 64
 registry_sha = hashlib.sha256(open(REGISTRY, "rb").read()).hexdigest()
@@ -274,8 +271,7 @@ def s105_inputs_pinned():
         sha, role = line.split()
         pins[role] = sha
     ok = True
-    for role, path in (("anchors", S105),
-                       ("runtime", S105[: -len(".json")] + ".runtime.json")):
+    for role, path in (("anchors", S105), ("runtime", S105_RUNTIME)):
         try:
             actual = hashlib.sha256(open(path, "rb").read()).hexdigest()
         except OSError as e:
@@ -296,18 +292,29 @@ def s105_inputs_pinned():
     return ok
 
 
-if not os.path.isfile(S105):
+S105_RUNTIME = S105[: -len(".json")] + ".runtime.json" if S105 else None
+if not S105:
+    missing = "$S105_ANCHORS (unset)"
+elif not os.path.isfile(S105):
+    missing = S105
+elif not os.path.isfile(S105_RUNTIME):
+    missing = S105_RUNTIME
+else:
+    missing = None
+if missing:
+    where = missing
     if os.environ.get("ALLOW_MISSING_S105_REGRESSION") == "1":
-        print(f"SKIP s105-regression — {S105} not found; explicitly waived via "
+        print(f"SKIP s105-regression — {where} not available; explicitly waived via "
               f"ALLOW_MISSING_S105_REGRESSION=1. LOUD NOTICE: backward-compatibility "
               f"is NOT proven on this machine; any gate treats this waiver as a finding.")
     else:
         n_fail += 1
-        print(f"FAIL s105-regression — {S105} not found and no explicit waiver. "
+        print(f"FAIL s105-regression — {where} not available and no explicit waiver. "
               f"Point $S105_ANCHORS at the gated S105 anchors file (its .runtime.json "
-              f"must sit next to it), or — outside gate runs only — set "
-              f"ALLOW_MISSING_S105_REGRESSION=1. A silent skip here would let a clean "
-              f"clone report green without the backward-compat proof.")
+              f"must sit next to it; the pair is kept OUTSIDE this public repo), or — "
+              f"outside gate runs only — set ALLOW_MISSING_S105_REGRESSION=1. A silent "
+              f"skip here would let a clean clone report green without the "
+              f"backward-compat proof.")
 elif s105_inputs_pinned():
     # pin failures are already counted inside s105_inputs_pinned()
     for label, args, base in (
