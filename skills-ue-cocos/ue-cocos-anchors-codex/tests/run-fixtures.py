@@ -263,7 +263,53 @@ case("render-subject-header", ["render", v11_subject], 0,
      contains=["### Anchors — M_test_material (T001)"])
 
 # ---- S105 regression: byte-identical to the pre-change baseline -------------
-if os.path.isfile(S105):
+def s105_inputs_pinned():
+    """The baselines are only meaningful against the EXACT external inputs they
+    were captured from — verify both files against their pinned sha256 before
+    trusting a byte-identical output (path existence alone would let edited or
+    rebound inputs claim regression coverage falsely)."""
+    global n_pass, n_fail
+    pins = {}
+    for line in open(os.path.join(BASELINES, "s105-inputs.sha256"), encoding="utf-8"):
+        sha, role = line.split()
+        pins[role] = sha
+    ok = True
+    for role, path in (("anchors", S105),
+                       ("runtime", S105[: -len(".json")] + ".runtime.json")):
+        try:
+            actual = hashlib.sha256(open(path, "rb").read()).hexdigest()
+        except OSError as e:
+            ok = False
+            n_fail += 1
+            print(f"FAIL s105-input-pin ({role}) — unreadable: {e}")
+            continue
+        if actual != pins[role]:
+            ok = False
+            n_fail += 1
+            print(f"FAIL s105-input-pin ({role}) — {path} sha256 {actual[:16]}… does not "
+                  f"match the baseline-time pin {pins[role][:16]}… from "
+                  f"baselines/s105-inputs.sha256; the committed baselines prove nothing "
+                  f"about this file. Re-capture baselines from a PRE-change script only.")
+    if ok:
+        n_pass += 1
+        print("PASS s105-input-pin")
+    return ok
+
+
+if not os.path.isfile(S105):
+    if os.environ.get("ALLOW_MISSING_S105_REGRESSION") == "1":
+        print(f"SKIP s105-regression — {S105} not found; explicitly waived via "
+              f"ALLOW_MISSING_S105_REGRESSION=1. LOUD NOTICE: backward-compatibility "
+              f"is NOT proven on this machine; any gate treats this waiver as a finding.")
+    else:
+        n_fail += 1
+        print(f"FAIL s105-regression — {S105} not found and no explicit waiver. "
+              f"Point $S105_ANCHORS at the gated S105 anchors file (its .runtime.json "
+              f"must sit next to it), or — outside gate runs only — set "
+              f"ALLOW_MISSING_S105_REGRESSION=1. A silent skip here would let a clean "
+              f"clone report green without the backward-compat proof.")
+elif s105_inputs_pinned():
+    # pin failures are already counted inside s105_inputs_pinned()
     for label, args, base in (
             ("s105-validate-regression", ["validate", S105, "--no-harvest"],
              "s105-validate.txt"),
@@ -281,17 +327,6 @@ if os.path.isfile(S105):
             print(f"FAIL {label} — output differs from pre-change baseline "
                   f"{base}; v1 behavior MUST be byte-identical (contract v1.1 "
                   f"is backward-readable by design)")
-elif os.environ.get("ALLOW_MISSING_S105_REGRESSION") == "1":
-    print(f"SKIP s105-regression — {S105} not found; explicitly waived via "
-          f"ALLOW_MISSING_S105_REGRESSION=1. LOUD NOTICE: backward-compatibility "
-          f"is NOT proven on this machine; any gate treats this waiver as a finding.")
-else:
-    n_fail += 1
-    print(f"FAIL s105-regression — {S105} not found and no explicit waiver. "
-          f"Point $S105_ANCHORS at the gated S105 anchors file (its .runtime.json "
-          f"must sit next to it), or — outside gate runs only — set "
-          f"ALLOW_MISSING_S105_REGRESSION=1. A silent skip here would let a clean "
-          f"clone report green without the backward-compat proof.")
 
 print(f"\n{n_pass} passed, {n_fail} failed (fixtures in {TMP})")
 sys.exit(1 if n_fail else 0)

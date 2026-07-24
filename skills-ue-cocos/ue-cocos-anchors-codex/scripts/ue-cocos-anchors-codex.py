@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """ue-cocos-anchors-codex.py — the anchor contract for UE->Cocos ports.
 
-Subcommands (all consult the pack's kind-registry.json; --kind-registry overrides):
+Subcommands (all consult the pack's kind-registry.json):
   validate <anchors.json>                      structural + semantic checks, exit 1 on any FAIL
+                                               (--kind-registry <file> = diagnostic injection; output is
+                                               marked CUSTOM REGISTRY — a gate finding)
   compare  <anchors.json> <runtime.json>       join by id, tolerance compare, exit 1 on any FAIL
-  render   <anchors.json> [-o out.md]          generate the human-readable anchor table (never hand-write it)
+                                               (--kind-registry allowed UNGATED only; combined with
+                                               --approved-sha it is refused)
+  render   <anchors.json> [-o out.md]          generate the human-readable anchor table (never
+                                               hand-write it); pack registry only, no --kind-registry
 
 Stdlib only. This script — not prose — owns the contract rules:
   - two accepted contracts: ue-cocos-anchors-codex/v1 (kinds imply the 'fx'
@@ -101,16 +106,20 @@ def load(path):
     return doc
 
 
-def load_registry(path, fails):
+def load_registry(path, fails, override_hint=True):
     """Load + structurally validate the kind registry. Fail closed: a missing,
     unreadable, or malformed registry is a FAIL, never a skip. Returns
-    ({(family, kind): meta}, sha256hex) or (None, None) with fails appended."""
+    ({(family, kind): meta}, sha256hex) or (None, None) with fails appended.
+    override_hint=False for commands that do not accept --kind-registry."""
     try:
         with open(path, "rb") as f:
             raw = f.read()
     except OSError as e:
+        hint = (" --kind-registry is available here as a diagnostic injection (marked "
+                "in output, unusable for gates)." if override_hint else
+                " This command uses the pack registry only.")
         fails.append(f"kind registry unreadable: {e} — the registry ships with the pack "
-                     f"(kind-registry.json); use --kind-registry to point elsewhere. "
+                     f"(kind-registry.json).{hint} "
                      f"No registry = no kind validation = FAIL, never a skip")
         return None, None
     sha = hashlib.sha256(raw).hexdigest()
@@ -638,7 +647,7 @@ def cmd_render(argv):
         src_sha = hashlib.sha256(f.read()).hexdigest()
     doc = load(src)
     fails = []
-    registry, reg_sha = load_registry(DEFAULT_REGISTRY, fails)
+    registry, reg_sha = load_registry(DEFAULT_REGISTRY, fails, override_hint=False)
     validate(doc, fails, None, registry, reg_sha)
     if fails:
         for f in fails:
