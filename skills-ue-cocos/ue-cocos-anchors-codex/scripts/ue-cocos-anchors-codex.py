@@ -149,6 +149,9 @@ def load_registry(path, fails, override_hint=True):
             if ok and "unitsAllowed" in meta:
                 ua = meta["unitsAllowed"]
                 ok = isinstance(ua, list) and len(ua) > 0 and all(is_str(u) for u in ua)
+            if ok and "expectedArrayLength" in meta:
+                n = meta["expectedArrayLength"]
+                ok = isinstance(n, int) and not isinstance(n, bool) and n > 0
             if not ok:
                 fails.append(f"kind registry entry '{fam}.{k}' malformed — kind name must match "
                              f"{NAME_RE.pattern}; requiresSpace/requiresField must be booleans; "
@@ -226,6 +229,10 @@ def validate(doc, fails, harvest_root=None, registry=None, registry_sha=None):
             fails.append(f"unknown top-level key '{k}' — the contract has no such field")
     seen_ids, seen_targets, cycle_times, all_emitters = set(), {}, {}, set()
     anchor_allowed = {"id", "source", "target", "at", "expected", "tolerance", "units", "dd", "note"}
+    if v11:
+        # v1.1: hand-transcribed values are representable and COUNTED — a value
+        # no derive helper could extract is a mandatory reviewer-focus item
+        anchor_allowed = anchor_allowed | {"transcribed"}
     sub_allowed = {"source": {"file", "path", "chain"},
                    "target": {"kind", "node", "space", "field", "extra"},
                    "at": {"cycleTime", "tick"},
@@ -247,6 +254,8 @@ def validate(doc, fails, harvest_root=None, registry=None, registry_sha=None):
                 for k in v:
                     if k not in allowed:
                         fails.append(f"{where}: unknown key '{sub}.{k}'")
+        if v11 and "transcribed" in a and not isinstance(a.get("transcribed"), bool):
+            fails.append(f"{where}: 'transcribed' must be a boolean")
         if "note" in a and not isinstance(a.get("note"), str):
             fails.append(f"{where}: 'note' must be a string")
         src0 = a.get("source")
@@ -323,6 +332,14 @@ def validate(doc, fails, harvest_root=None, registry=None, registry_sha=None):
                 if ua and is_str(a.get("units")) and a["units"] not in ua:
                     fails.append(f"{where}: units '{a['units']}' not allowed for kind '{kind}' — "
                                  f"the registry allows: {', '.join(ua)}")
+                want_n = meta.get("expectedArrayLength")
+                if isinstance(want_n, int) and not isinstance(want_n, bool):
+                    exp_v = a.get("expected")
+                    if not (isinstance(exp_v, list) and len(exp_v) == want_n):
+                        fails.append(f"{where}: kind '{kind}' requires an expected array of "
+                                     f"exactly {want_n} components (got "
+                                     f"{len(exp_v) if isinstance(exp_v, list) else type(exp_v).__name__})"
+                                     f" — a short array would leave a channel unchecked")
 
         at = a.get("at")
         at_key = None
@@ -489,6 +506,11 @@ def cmd_validate(argv):
     if isinstance(doc, dict) and doc.get("contract") == CONTRACT_V11 and reg_sha is not None:
         print(f"  kind registry: sha256 {reg_sha} — recorded as kindRegistrySha and "
               f"re-checked by compare")
+    n_transcribed = sum(1 for a in anchors
+                        if isinstance(a, dict) and a.get("transcribed") is True)
+    if n_transcribed:
+        print(f"  transcribed: {n_transcribed} hand-entered anchor(s) — every one is "
+              f"a MANDATORY reviewer-focus item at the Stage-2 gate")
     for emitter, n in sorted(emitter_counts(anchors).items()):
         print(f"  coverage: {emitter} — {n} anchor(s)")
     print("  NOTE: this script proves 'everything anchored is verified' and CANNOT prove "

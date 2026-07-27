@@ -25,6 +25,11 @@ certification run additionally requires a pinned PYTHONHASHSEED.
 
 PACK CODE IS ALLOWLISTED, not denylisted — everything not explicitly
 recognized fails closed:
+  - SYNTAX ALLOWLIST: only the AST node types in ALLOWED_AST_NODES may appear.
+    match statements, async/await, yield, global/nonlocal, del, and any future
+    syntax FAIL. This is what makes the binding scan COMPLETE — no
+    unrecognized construct (e.g. `except E as len`) can shadow a builtin the
+    walker trusts;
   - importable stdlib modules: json, os, sys, re, math, hashlib, itertools,
     collections, functools, struct; anything else — importlib, pathlib, io,
     runpy, builtins, ctypes, subprocess, third-party, unresolvable — FAILS.
@@ -38,12 +43,18 @@ recognized fails closed:
     file must be symlink-contained under the pack root; relative imports
     FAIL; `import pkg.mod` / `from pkg import name` pull every parent
     __init__.py plus the submodule into the closure;
-  - file reads: ONLY read-only `open(os.path.join(os.path.dirname(__file__),
-    <literals...>), 'r'|'rb')` resolving to a declared, EXISTING file, with
-    at most two positional arguments; text mode REQUIRES a literal encoding
-    (locale independence); write modes FAIL (derived output must never
-    overwrite the oracle); `open` used as a value FAILS; `__file__` is legal
-    ONLY inside that read expression; os.path pure string functions (join,
+  - file reads: read-only, ≤2 positional arguments, text mode REQUIRES a
+    literal encoding (locale independence), write modes FAIL (derived output
+    must never overwrite the oracle), `open` used as a value FAILS. Exactly
+    TWO path forms are accepted: (1) `open(os.path.join(os.path.dirname(
+    __file__), <literals...>), …)` resolving to a declared, EXISTING pack
+    file (`__file__` is legal ONLY inside that expression); (2)
+    `open(sys.argv[<int literal>], …)` — the CLI-input form: the file is a
+    PORT PARAMETER supplied by the declared invocation, outside the closure
+    by design (its integrity is owned by the anchors contract's source
+    addresses and --harvest-root). sys.argv itself is legal ONLY as a
+    read-only literal subscript (index ≥ 1, within what some declared
+    invocation supplies) or inside len(); aliasing/mutation/iteration FAIL; os.path pure string functions (join,
     dirname, basename, normpath, split, splitext — called directly; relpath
     is NOT allowlisted, it consults the cwd) are the only allowlisted os
     surface besides the environ forms below;
@@ -98,6 +109,22 @@ BANNED_BUILTINS = {"exec", "eval", "compile", "__import__", "input", "breakpoint
                    "hash", "id"}  # hash/id depend on the per-process hash seed /
                                   # object identity — nondeterministic oracle inputs
 SAFE_OPEN_MODES = {"r", "rb"}
+# Syntax allowlist: pack code may use ONLY these AST node types. Anything else
+# — match statements, async/await, yield, global/nonlocal, del, and any future
+# syntax — fails closed. This is what makes the binding scan below COMPLETE:
+# every construct that can bind a name is either in this list (and collected)
+# or rejected outright, so an unrecognized binding form can never shadow a
+# builtin silently. Widening the list is a gated edit.
+ALLOWED_AST_NODES = frozenset((
+    "Module", "FunctionDef", "ClassDef", "Return", "Assign", "AugAssign",
+    "AnnAssign", "For", "While", "If", "With", "withitem", "Raise", "Try",
+    "ExceptHandler", "Assert", "Import", "ImportFrom", "alias", "Expr", "Pass",
+    "Break", "Continue", "BoolOp", "NamedExpr", "BinOp", "UnaryOp", "Lambda",
+    "IfExp", "Dict", "Set", "ListComp", "SetComp", "DictComp", "GeneratorExp",
+    "comprehension", "Compare", "Call", "keyword", "Constant", "JoinedStr",
+    "FormattedValue", "Attribute", "Subscript", "Starred", "Name", "List",
+    "Tuple", "Slice", "arguments", "arg",
+))
 # Interpreter-state env vars pinned into EVERY closure: they change import
 # resolution, text decoding, locale-dependent matching, and hash iteration
 # order without touching any file. LC_CTYPE outranks LANG when LC_ALL is unset.
@@ -306,10 +333,29 @@ def _is_dirname_file(node):
             and node.args[0].id == "__file__")
 
 
+def _is_argv_subscript(node):
+    """sys.argv[<int literal>] — the CLI-input read form: the file is a PORT
+    PARAMETER supplied by the declared invocation, not a component of the
+    oracle; its integrity is owned by the anchors contract's source addresses
+    and --harvest-root, so it stays outside the closure by design."""
+    return (isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "argv"
+            and isinstance(node.value.value, ast.Name)
+            and node.value.value.id == "sys"
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, int)
+            and not isinstance(node.slice.value, bool))
+
+
 def resolve_read_arg(node, file_dir, pack_dir):
-    """The ONLY accepted open() path form:
-    os.path.join(os.path.dirname(__file__), <literals...>) — cwd-independent
-    by construction. Returns ('rel', relpath) | ('fail', reason)."""
+    """Accepted open() path forms:
+    (1) os.path.join(os.path.dirname(__file__), <literals...>) — a declared
+        pack file, cwd-independent by construction;
+    (2) sys.argv[<int literal>] — a CLI input (see _is_argv_subscript).
+    Returns ('rel', relpath) | ('argv', index) | ('fail', reason)."""
+    if _is_argv_subscript(node):
+        return "argv", node.slice.value
     if _const_str(node) is not None:
         return "fail", ("bare literal path is cwd-dependent (the declared invocation "
                         "cwd can move it); use "
@@ -337,13 +383,83 @@ def _is_call_func(node, parents):
     return isinstance(par, ast.Call) and par.func is node
 
 
-def scan_module(tree, rel, file_dir, pack_dir, pack, fails):
+def scan_module(tree, rel, file_dir, pack_dir, pack, fails, max_argv=0):
     """Allowlist enforcement over one module's execution surface (design §2).
     Sensitive names are accepted ONLY in explicitly recognized contexts —
     used as values, aliased, or reached through unknown attributes they fail
-    closed. Everything not explicitly recognized fails closed."""
+    closed. Everything not explicitly recognized fails closed. max_argv is the
+    largest argv index supplied by any invocation of the entrypoint(s) that
+    reach THIS module (argv[0] is the script itself)."""
     declared_env = set(pack.get("env", []))
     parents = {}
+    # Syntax gate FIRST: only allowlisted node types may appear (operators and
+    # contexts are structural, not binding forms). This bounds the binding
+    # problem — every remaining construct that binds a name is handled below.
+    structural = (ast.operator, ast.unaryop, ast.boolop, ast.cmpop,
+                  ast.expr_context)
+    unknown = set()
+    for node in ast.walk(tree):
+        if isinstance(node, structural):
+            continue
+        name = type(node).__name__
+        if name not in ALLOWED_AST_NODES:
+            unknown.add(name)
+    if unknown:
+        fails.append(f"{rel}: syntax outside the pack-code allowlist "
+                     f"({', '.join(sorted(unknown))}) — unrecognized constructs can "
+                     f"bind names (shadowing builtins) or change the execution model "
+                     f"in ways the walker does not model; fails closed (widening the "
+                     f"list is a gated edit)")
+    # names the module BINDS — with the syntax gate above, these forms are
+    # exhaustive; a bound 'len' shadows the builtin, so len(sys.argv) is then
+    # no longer trusted
+    bound_names, non_import_bound = set(), set()
+    # a trusted root may be bound ONLY by its canonical plain import
+    # (`import sys`) — `from pkg import sys` would bind pack code under a
+    # trusted name and make every syntactic recognition below a lie
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                if (a.asname or a.name) in ("sys", "os", "open", "__file__"):
+                    non_import_bound.add(a.asname or a.name)
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                bound = a.asname or a.name.split(".")[0]
+                if bound in ("sys", "os", "open", "__file__") and \
+                        (a.asname is not None or "." in a.name):
+                    non_import_bound.add(bound)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            bound_names.add(node.name)
+            non_import_bound.add(node.name)
+        if isinstance(node, ast.arg):
+            bound_names.add(node.arg)
+            non_import_bound.add(node.arg)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound_names.add(node.id)
+            non_import_bound.add(node.id)
+        if isinstance(node, ast.ExceptHandler) and node.name:
+            bound_names.add(node.name)
+            non_import_bound.add(node.name)
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for a in node.names:
+                bound_names.add(a.asname or a.name.split(".")[0])
+    # The special forms below (sys.argv[N], os.path.join(os.path.dirname(
+    # __file__)…), os.environ) are recognized SYNTACTICALLY, so the roots must
+    # really be the imported modules: any non-import binding of a trusted root
+    # — parameter, assignment, def/class name, except alias — fails closed.
+    # This scan is module-wide rather than scope-aware ON PURPOSE: a shadow
+    # anywhere makes the syntactic recognition unsound somewhere.
+    for root in ("sys", "os", "open", "__file__"):
+        if root in non_import_bound:
+            fails.append(f"{rel}: '{root}' is bound by pack code (parameter, "
+                         f"assignment, def/class, except alias, or a non-canonical "
+                         f"import such as 'from pkg import {root}') — the trusted "
+                         f"forms recognized by this walker (sys.argv[N], "
+                         f"os.path/os.environ, the declared-read chain) assume the "
+                         f"real module/builtin; a shadow makes that recognition "
+                         f"unsound; fails closed")
+    len_is_builtin = "len" not in bound_names
     for node in ast.walk(tree):
         for child in ast.iter_child_nodes(node):
             parents[child] = node
@@ -353,13 +469,23 @@ def scan_module(tree, rel, file_dir, pack_dir, pack, fails):
                 if a.asname is not None:
                     fails.append(f"{rel}: import aliasing ('{a.name} as {a.asname}') "
                                  f"makes static tracking unsound; fails closed")
+                if a.name == "*":
+                    fails.append(f"{rel}: wildcard import — the names it binds cannot "
+                                 f"be determined statically, so a shadowed builtin "
+                                 f"(e.g. an exported mutating 'len') would go "
+                                 f"unnoticed; fails closed")
         if isinstance(node, ast.ImportFrom) and node.module and \
                 node.module.split(".")[0] == "os":
             fails.append(f"{rel}: 'from os import …' — aliased os access fails closed "
                          f"(qualified os.… forms only)")
         if isinstance(node, ast.Name):
             nid = node.id
-            if nid == "open" and not _is_call_func(node, parents):
+            if nid.startswith("__") and nid not in ("__file__", "__name__"):
+                fails.append(f"{rel}: dunder name '{nid}' — implicit interpreter "
+                             f"objects (notably __builtins__, whose entries can be "
+                             f"REPLACED to make a trusted call mutate its argument) "
+                             f"are outside every surface check; fails closed")
+            elif nid == "open" and not _is_call_func(node, parents):
                 fails.append(f"{rel}: builtin 'open' used as a value — aliased file IO "
                              f"is opaque; fails closed")
             elif nid in BANNED_BUILTINS:
@@ -394,8 +520,25 @@ def scan_module(tree, rel, file_dir, pack_dir, pack, fails):
                 if not (is_attr_base or is_import):
                     fails.append(f"{rel}: module '{nid}' used as a value — aliasing "
                                  f"makes static tracking unsound; fails closed")
+        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+            fails.append(f"{rel}: dunder attribute '.{node.attr}' — introspection "
+                         f"reaches module/function internals (e.g. sys.exit.__self__ "
+                         f"is the sys module itself), defeating every surface check; "
+                         f"fails closed")
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             base, attr = node.value.id, node.attr
+            # a sensitive module attribute may never be the BASE of a further
+            # attribute chain, EXCEPT the forms this walker models explicitly
+            # (os.path.<fn>, os.environ.get, and sys.argv which has its own
+            # stricter branch below)
+            par = parents.get(node)
+            modelled_chain = (base == "os" and attr in ("path", "environ")) or \
+                             (base == "sys" and attr == "argv")
+            if base in ("os", "sys", "subprocess") and not modelled_chain and \
+                    isinstance(par, ast.Attribute) and par.value is node:
+                fails.append(f"{rel}: chained attribute {base}.{attr}.{par.attr} — "
+                             f"only the modelled surfaces are checkable; chaining off "
+                             f"one of them reaches unmodelled objects; fails closed")
             if base == "os":
                 if attr not in ALLOWED_OS_ATTRS:
                     fails.append(f"{rel}: os.{attr} is not an allowlisted os surface "
@@ -419,6 +562,37 @@ def scan_module(tree, rel, file_dir, pack_dir, pack, fails):
                         if not (isinstance(grand, ast.Call) and grand.func is par):
                             fails.append(f"{rel}: os.path.{par.attr} used as a value — "
                                          f"aliasing fails closed")
+            elif base == "sys" and attr == "argv":
+                par = parents.get(node)
+                if isinstance(par, ast.Subscript) and par.value is node and \
+                        isinstance(par.ctx, ast.Load) and \
+                        isinstance(par.slice, ast.Constant) and \
+                        isinstance(par.slice.value, int) and \
+                        not isinstance(par.slice.value, bool):
+                    n = par.slice.value
+                    if n < 1:
+                        fails.append(f"{rel}: sys.argv[{n}] — index 0 is the script "
+                                     f"path, not a port parameter; CLI inputs start "
+                                     f"at 1; fails closed")
+                    elif n > max_argv:
+                        fails.append(f"{rel}: sys.argv[{n}] — no declared invocation "
+                                     f"of an entrypoint reaching this module supplies "
+                                     f"more than {max_argv} argument(s); a read the "
+                                     f"invocation contract cannot satisfy fails "
+                                     f"closed")
+                elif isinstance(par, ast.Call) and isinstance(par.func, ast.Name) and \
+                        par.func.id == "len" and node in par.args:
+                    if not len_is_builtin:
+                        fails.append(f"{rel}: len(sys.argv) where 'len' is shadowed "
+                                     f"by a pack binding — the callee could mutate "
+                                     f"argv and escape the CLI-input closure; fails "
+                                     f"closed")
+                else:
+                    fails.append(f"{rel}: sys.argv used outside read-only literal "
+                                 f"subscripts and len() — aliasing, mutation, "
+                                 f"iteration, or passing it as a value would let "
+                                 f"undeclared host files escape the CLI-input "
+                                 f"closure; fails closed")
             elif base == "sys" and attr not in SAFE_SYS_ATTRS:
                 fails.append(f"{rel}: sys.{attr} is not an allowlisted sys surface "
                              f"({', '.join(sorted(SAFE_SYS_ATTRS))}) — stdin, import "
@@ -474,6 +648,9 @@ def scan_module(tree, rel, file_dir, pack_dir, pack, fails):
                 if kind == "fail":
                     fails.append(f"{rel}: open() — {val}; reading outside the manifest "
                                  f"fails closed")
+                elif kind == "argv":
+                    pass  # CLI-input form: a port parameter outside the closure
+                          # by design (see _is_argv_subscript)
                 elif not is_declared_read(val, pack):
                     fails.append(f"{rel}: open() resolves to '{val}' which is not "
                                  f"declared (dataFiles/profileDoc/featuresFile/"
@@ -511,6 +688,10 @@ def walk_code(pack_dir, pack, fails):
     another entrypoint's directory). Returns ({rel: sha}, stdlib)."""
     root_realpath = os.path.realpath(pack_dir)
     seen, stdlib_used, scanned = {}, set(), set()
+    # module scans are DEFERRED until every entrypoint has been walked: a
+    # module's argv bound is the max over the entrypoints that actually
+    # reach it, which is only known after all walks (trees are parsed once)
+    trees, mod_argv = {}, {}
     for e in pack["entrypoints"]:
         start = os.path.realpath(os.path.join(pack_dir, e))
         if not os.path.isfile(start):
@@ -520,6 +701,12 @@ def walk_code(pack_dir, pack, fails):
             fails.append(f"entrypoint '{e}' escapes the pack root — fails closed")
             continue
         root = os.path.dirname(start)
+        # the argv bound for every module REACHED from this entrypoint is the
+        # largest argv this entrypoint's own invocations supply — one
+        # entrypoint can never borrow another's arity (its runs cannot
+        # satisfy it)
+        arity = max((len(i.get("argv", [])) for i in pack.get("invocations", [])
+                     if i.get("entrypoint") == e), default=0)
         queue, visited = [start], set()
         while queue:
             path = queue.pop()
@@ -531,17 +718,20 @@ def walk_code(pack_dir, pack, fails):
                 continue
             rel = os.path.relpath(path, pack_dir)
             seen[rel] = sha256_file(path)
-            try:
-                tree = ast.parse(open(path, "r", encoding="utf-8").read(), filename=rel)
-            except SyntaxError as err:
-                if rel not in scanned:
-                    scanned.add(rel)
-                    fails.append(f"{rel}: unparseable ({err}) — no closure over code "
-                                 f"that cannot be read")
-                continue
-            if rel not in scanned:
-                scanned.add(rel)
-                scan_module(tree, rel, os.path.dirname(path), pack_dir, pack, fails)
+            mod_argv[path] = max(mod_argv.get(path, 0), arity)
+            if path in trees:
+                tree = trees[path]
+            else:
+                try:
+                    tree = ast.parse(open(path, "r", encoding="utf-8").read(),
+                                     filename=rel)
+                except SyntaxError as err:
+                    if rel not in scanned:
+                        scanned.add(rel)
+                        fails.append(f"{rel}: unparseable ({err}) — no closure over "
+                                     f"code that cannot be read")
+                    continue
+                trees[path] = tree
             for node in ast.walk(tree):
                 targets = []
                 if isinstance(node, ast.Import):
@@ -606,6 +796,12 @@ def walk_code(pack_dir, pack, fails):
                                      f"everything else is opaque to the closure walker "
                                      f"and fails closed (widening the list is a gated "
                                      f"edit)")
+    for path, tree in trees.items():
+        rel = os.path.relpath(path, pack_dir)
+        if rel not in scanned:
+            scanned.add(rel)
+            scan_module(tree, rel, os.path.dirname(path), pack_dir, pack, fails,
+                        max_argv=mod_argv.get(path, 0))
     return seen, sorted(stdlib_used)
 
 

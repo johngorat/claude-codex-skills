@@ -44,7 +44,9 @@ REQUIRED and checked by validate AND compare (same discipline as
 warning); a declared loop carries `mode: resetting | accumulating`,
 script-derived from dump fields, never author-chosen (`accumulating` is
 rejected until the animations family profile implements its seam-continuity
-semantics).
+semantics); an anchor may carry `transcribed: true` — the ONLY legitimate way
+to hand-enter a value a derive helper could not extract, counted by validate
+and a MANDATORY reviewer-focus item at the Stage-2 gate.
 
 **The kind registry** (`kind-registry.json`, machine-readable) is the single
 source for the kind vocabulary: per kind it owns the space/field requirements

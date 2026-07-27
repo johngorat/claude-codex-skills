@@ -81,6 +81,39 @@
           "description": "render sort priority of the node relative to sibling FX"
         }
       }
+    },
+    "materials": {
+      "description": "Standalone material ports (PORT-V2 phase 2). Static binding anchors plus mandatory render_sample anchors for non-trivial graph math; sample points are profile-MANDATED (derive-render-points.py), never author-chosen.",
+      "kinds": {
+        "uniform": {
+          "requiresSpace": false,
+          "requiresField": true,
+          "toleranceNote": "numeric abs/rel; strings (enums) exact",
+          "description": "material uniform value on the target; 'field' = uniform name (units vary by uniform)"
+        },
+        "pass_state": {
+          "requiresSpace": false,
+          "requiresField": true,
+          "unitsAllowed": ["enum", "flag", "0..1", "level"],
+          "toleranceNote": "exact for enums/flags; numeric abs for clip values and mip-level biases",
+          "description": "render pass state; 'field' = state name (blend mode, depth write, two-sided, alpha-test threshold, sampler.<slot>.<state> incl. lodBias in mip levels, ...)"
+        },
+        "texture_binding": {
+          "requiresSpace": false,
+          "requiresField": true,
+          "unitsAllowed": ["texture"],
+          "toleranceNote": "exact (asset identity string)",
+          "description": "texture bound to a sampler slot; 'field' = slot/sampler name"
+        },
+        "render_sample": {
+          "requiresSpace": false,
+          "requiresField": true,
+          "unitsAllowed": ["linear-rgb"],
+          "expectedArrayLength": 4,
+          "toleranceNote": "numeric abs/rel per channel over [r,g,b,a]",
+          "description": "rgba readback of the rendered material at one mandated UV point; 'field' = the point key emitted by derive-render-points.py (e.g. 'u0.500_v0.300'); expected is a 4-array"
+        }
+      }
     }
   }
 }

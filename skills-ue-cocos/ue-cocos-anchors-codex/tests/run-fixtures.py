@@ -234,6 +234,41 @@ case("compare-registry-sha-mismatch",
      ["compare", v11_badsha, runtime_for(v11_badsha, "v11-ok.runtime.json")], 1,
      contains=["FAIL(anchors)", "does not match the kind registry in use"])
 
+def as_render_sample(d, components):
+    a = d["anchors"][0]
+    a["target"] = {"kind": "materials.render_sample", "node": "Quad",
+                   "field": "u0.500_v0.500"}
+    a.update(expected=components, tolerance={"abs": 0.01}, units="linear-rgb")
+    d["anchors"].pop(1)
+    d.pop("loop", None)
+
+
+case("v11-render-sample-rgba-ok",
+     ["validate", mutated("v11-ok.json", "rs-ok.json",
+                          lambda d: as_render_sample(d, [0.1, 0.2, 0.3, 1.0])),
+      "--no-harvest"], 0, contains=[": 1 anchors, 0 problems"], forbids=["FAIL"])
+case("v11-render-sample-rgb-rejected",
+     ["validate", mutated("v11-ok.json", "rs-short.json",
+                          lambda d: as_render_sample(d, [0.1, 0.2, 0.3])),
+      "--no-harvest"], 1,
+     contains=["exactly 4 components", "leave a channel unchecked"])
+
+case("v11-transcribed-ok",
+     ["validate", mutated("v11-ok.json", "m-transcribed.json",
+                          lambda d: d["anchors"][0].update(transcribed=True)),
+      "--no-harvest"], 0,
+     contains=["transcribed: 1 hand-entered anchor(s)", "MANDATORY reviewer-focus"])
+case("v11-transcribed-nonbool",
+     ["validate", mutated("v11-ok.json", "m-transcribed-bad.json",
+                          lambda d: d["anchors"][0].update(transcribed="yes")),
+      "--no-harvest"], 1,
+     contains=["'transcribed' must be a boolean"])
+case("v1-transcribed-rejected",
+     ["validate", mutated("v1-mini.json", "v1-transcribed.json",
+                          lambda d: d["anchors"][0].update(transcribed=True)),
+      "--no-harvest"], 1,
+     contains=["unknown key 'transcribed'"])
+
 # ---- registry trust boundary: gates run on the pack registry only -----------
 reg_copy = os.path.join(TMP, "registry-copy.json")
 open(reg_copy, "w", encoding="utf-8").write(open(REGISTRY, encoding="utf-8").read())

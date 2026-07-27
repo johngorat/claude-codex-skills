@@ -464,7 +464,7 @@ case("matrix-symlink-features",
 case("hash-dunder-import",
      ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
         "x = __import__('json')\n")), "pack.json")], 1,
-     contains=["'__import__' is banned"])
+     contains=["dunder name '__import__'"])
 case("hash-exec-eval",
      ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
         "def derive(lut, mode):\n    return eval('1+1')\n")), "pack.json")], 1,
@@ -508,6 +508,125 @@ case("hash-open-opaque-path",
      ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
         "def derive(lut, mode):\n    return open(mode)\n")), "pack.json")], 1,
      contains=["not statically resolvable"])
+case("hash-open-argv-input-ok",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\n\ndef derive(lut, mode):\n    return open(sys.argv[1], 'rb')\n")),
+      "pack.json"), "-o", os.path.join(TMP, "argv-ok.json")], 0,
+     contains=["closure"])
+case("hash-open-argv-nonliteral-index",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\n\ndef derive(lut, mode):\n    return open(sys.argv[mode])\n")),
+      "pack.json")], 1,
+     contains=["not statically resolvable"])
+case("hash-open-argv-write-mode-rejected",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\n\ndef derive(lut, mode):\n    return open(sys.argv[1], 'w')\n")),
+      "pack.json")], 1,
+     contains=["may only READ"])
+case("hash-argv-alias-rejected",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\nargs = sys.argv\n")), "pack.json")], 1,
+     contains=["aliasing, mutation, iteration"])
+case("hash-argv-store-rejected",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\nsys.argv[1] = 'x'\n")), "pack.json")], 1,
+     contains=["sys.argv used outside read-only literal subscripts"])
+case("hash-argv-zero-rejected",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\nX = sys.argv[0]\n")), "pack.json")], 1,
+     contains=["index 0 is the script path"])
+case("hash-argv-out-of-range",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\nX = sys.argv[9]\n")), "pack.json")], 1,
+     contains=["no declared invocation of an entrypoint reaching this module"])
+case("hash-argv-len-ok",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\nN = len(sys.argv)\n")), "pack.json"),
+      "-o", os.path.join(TMP, "len-ok.json")], 0, contains=["closure"])
+case("hash-argv-shadowed-len",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\n\n\ndef len(x):\n    return 0\n\n\nN = len(sys.argv)\n")),
+      "pack.json")], 1,
+     contains=["'len' is shadowed by a pack binding"])
+case("hash-argv-shadowed-len-except-alias",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\n\ntry:\n    pass\nexcept Exception as len:\n    pass\n\n"
+        "N = len(sys.argv)\n")), "pack.json")], 1,
+     contains=["'len' is shadowed by a pack binding"])
+def local_sys_shadow(d):
+    write(d, "scripts/pkgsys.py", "argv = ['', '/outside/file']\n")
+    write(d, "scripts/helper.py",
+          "from pkgsys import argv as sys\nX = open(sys[1], 'rb')\n")
+
+
+case("hash-local-module-shadows-sys",
+     ["hash", os.path.join(pack_copy(local_sys_shadow), "pack.json")], 1,
+     contains=["'sys' is bound by pack code"])
+case("hash-shadowed-sys-param",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "def read_other(sys):\n    return open(sys.argv[1], 'rb')\n")),
+      "pack.json")], 1,
+     contains=["'sys' is bound by pack code"])
+case("hash-shadowed-os-assign",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import os\nos = None\n")), "pack.json")], 1,
+     contains=["'os' is bound by pack code"])
+case("hash-shadowed-open-def",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "def open(p, mode='r'):\n    return p\n")), "pack.json")], 1,
+     contains=["'open' is bound by pack code"])
+case("hash-sys-dunder-chain",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\nsys.exit.__self__.argv[1] = '/etc/passwd'\n"
+        "X = open(sys.argv[1], 'rb')\n")), "pack.json")], 1,
+     contains=["dunder attribute '.__self__'"])
+case("hash-builtins-mutation",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\n\n\ndef evil(x):\n    x[1] = '/etc/passwd'\n    return 0\n\n\n"
+        "__builtins__.len = evil\nN = len(sys.argv)\nX = open(sys.argv[1], 'rb')\n")),
+      "pack.json")], 1,
+     contains=["dunder name '__builtins__'"])
+case("hash-builtins-direct-open",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "X = __builtins__.open('/etc/passwd')\n")), "pack.json")], 1,
+     contains=["dunder name '__builtins__'"])
+case("hash-sys-attr-chain",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "import sys\nX = sys.exit.attr\n")), "pack.json")], 1,
+     contains=["chained attribute sys.exit.attr"])
+
+
+def wildcard_pkg(d):
+    write(d, "scripts/evil.py", "def len(x):\n    return 0\n")
+    write(d, "scripts/helper.py",
+          "import sys\nfrom evil import *\n\nN = len(sys.argv)\n")
+
+
+case("hash-wildcard-import",
+     ["hash", os.path.join(pack_copy(wildcard_pkg), "pack.json")], 1,
+     contains=["wildcard import", "shadowed builtin"])
+case("hash-syntax-outside-allowlist",
+     ["hash", os.path.join(pack_copy(lambda d: write(d, "scripts/helper.py",
+        "X = 1\nglobal_state = None\n\n\ndef derive(lut, mode):\n"
+        "    global global_state\n    return 1\n")), "pack.json")], 1,
+     contains=["syntax outside the pack-code allowlist", "Global"])
+
+
+def two_arity_roots(d):
+    # main's invocation supplies THREE args; short.py's supplies ONE — under a
+    # global bound short.py could borrow main's arity for sys.argv[2]
+    os.makedirs(os.path.join(d, "scripts2"))
+    write(d, "scripts2/short.py", "import sys\nX = open(sys.argv[2], 'rb')\n")
+    edit_json(d, "pack.json", lambda doc: (
+        doc["invocations"][0].update(argv=["a", "b", "c"]),
+        doc["entrypoints"].append("scripts2/short.py"),
+        doc["invocations"].append({"entrypoint": "scripts2/short.py",
+                                   "argv": ["only-one"]})))
+
+
+case("hash-argv-no-arity-borrowing",
+     ["hash", os.path.join(pack_copy(two_arity_roots), "pack.json")], 1,
+     contains=["sys.argv[2]", "entrypoint reaching this module"])
 
 # ---- environment closure ------------------------------------------------------
 case("hash-undeclared-env",

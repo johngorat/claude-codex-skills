@@ -65,10 +65,13 @@ os.getenv`, `reader = open`), `__file__` outside the recognized read
 expression, non-allowlisted os/sys surfaces (only pure-string `os.path.*`
 called directly — relpath is excluded, it consults the cwd — plus
 literal-form `os.environ`/`os.getenv`; no stdin, no import state, no
-executable path), file reads outside the single accepted form (read-only
-`open(os.path.join(os.path.dirname(__file__), <literals>), 'r'|'rb')` with
-≤2 positional arguments to a declared EXISTING file; text mode requires a
-literal encoding), and environment enumeration/aliasing. **Process launch is
+executable path), file reads outside the two accepted forms (both read-only,
+≤2 positional arguments, literal encoding in text mode: the declared-file
+form `open(os.path.join(os.path.dirname(__file__), <literals>), 'r'|'rb')`
+to an EXISTING pack file, and the CLI-input form
+`open(sys.argv[<int literal>], …)` — a port parameter outside the closure by
+design, its integrity owned by the anchors contract's source addresses), and
+environment enumeration/aliasing. **Process launch is
 not supported in this contract** — any subprocess use or `subprocesses`
 manifest key fails closed; it returns with the runtime-enforcement layer
 (phase 2+), which can bind inherited stdin/env/PATH and interpreter

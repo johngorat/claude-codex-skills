@@ -92,6 +92,7 @@
             },
             "description": "USER-approved deliberate divergence — the only legitimate way to differ from the source. Reported as DD by compare, never PASS/FAIL."
           },
+          "transcribed": { "type": "boolean", "description": "v1.1 only: true marks a hand-entered value no derive helper could extract — a MANDATORY reviewer-focus item at the Stage-2 gate. Rejected in v1 files (unknown key)." },
           "note": { "type": "string" }
         }
       }
@@ -103,7 +104,10 @@
       "then": {
         "required": ["fx"],
         "not": { "anyOf": [ { "required": ["subject"] }, { "required": ["kindRegistrySha"] } ] },
-        "properties": { "loop": { "type": ["object", "null"], "additionalProperties": false, "required": ["periodSec"], "properties": { "periodSec": {} } } }
+        "properties": {
+          "loop": { "type": ["object", "null"], "additionalProperties": false, "required": ["periodSec"], "properties": { "periodSec": {} } },
+          "anchors": { "items": { "not": { "required": ["transcribed"] } } }
+        }
       }
     },
     {
