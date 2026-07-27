@@ -62,21 +62,14 @@ Each skill is a self-contained folder under `skills/` (SKILL.md + bundled
 files). More Codex-related skills may land here later; they all install the
 same way.
 
-## UE→Cocos porting pack (`skills-ue-cocos/`)
+## Companion packs
 
-A sharpened companion pack for porting UE Niagara FX to Cocos. It **requires
-the generic family to be installed** — its gates are executed by invoking
-`codex-debate`/`codex-check` and its planning follows `codex-plan` — while the
-generic family stays pure and never references this pack or its conventions.
-Install by copying or symlinking each pack skill folder into
-`~/.claude/skills/` alongside the generic three; additionally requires
-`python3` (3.8+, stdlib only) on PATH — the pack's contract checks are
-executable scripts, not prose.
-
-| Skill | What it does |
-|---|---|
-| [`ue-cocos-port-codex`](skills-ue-cocos/ue-cocos-port-codex/SKILL.md) | The port pipeline orchestrator: harvest → value authority + anchors → implementation + runtime probe → wiring, with review tiers per stage, mandatory pre-gate checklist attestation, and the pack's conventions (`CODEX-LESSONS.md`, `FX-GATE-PRECHECK.md`). Entry point: `/ue-cocos-port-codex <NS_system>`. |
-| [`ue-cocos-anchors-codex`](skills-ue-cocos/ue-cocos-anchors-codex/SKILL.md) | The anchor contract: machine-readable anchors binding every ported value to its UE dump source and Cocos runtime target; script-validated, script-compared — numeric render truth instead of visual verdicts. |
+Task-sharpened packs (e.g. an engine-to-engine porting pipeline) build ON TOP
+of this generic family — their gates invoke `codex-debate`/`codex-check` and
+their planning follows `codex-plan` — while the generic family stays pure and
+never references any pack or its conventions. Packs live in their own
+repositories and install the same way: symlink each pack skill folder into
+`~/.claude/skills/` alongside the generic three.
 
 ## Requirements
 
