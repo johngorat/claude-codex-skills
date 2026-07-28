@@ -12,12 +12,21 @@
 
 ## What you are setting up
 
-Skills from this repo's `skills/` folder — currently `codex-debate`: Claude
-implements a task, sends the diff to OpenAI Codex (top-tier model available on
-the plan, read-only sandbox) for adversarial review, debates the findings
-(fixes real ones, rebuts false positives with evidence), and loops — resuming
-the same Codex thread — until Codex returns `APPROVED` and local checks are
-green. Max 5 rounds, anti-loop guards included.
+Skills from this repo's `skills/` folder — the Codex reviewer family:
+
+- **`codex-debate`** — the full loop: Claude implements a task, sends the diff
+  to OpenAI Codex (top-tier model available on the plan, read-only sandbox)
+  for adversarial review, debates the findings (fixes real ones, rebuts false
+  positives with evidence), and loops — resuming the same Codex thread — until
+  Codex returns `APPROVED` and local checks are green. Max 5 rounds, anti-loop
+  guards included.
+- **`codex-check`** — one-shot advisory review (second-tier model, quota-cheap)
+  for routine changes; escalates to a debate when a major finding stands.
+- **`codex-plan`** — turns a substantial multi-stage task into a staged plan
+  with a review tier per stage.
+
+Install all three unless the human says otherwise — check and plan reference
+the debate skill.
 
 Codex runs on a ChatGPT subscription (OAuth login), not a paid API key — review
 tokens draw from the plan's rolling 5-hour quota window, not a per-token bill.
@@ -126,24 +135,44 @@ All probes run from inside a git directory, Bash timeout ≥ 180000 ms.
      `<skill dir>/model.txt` (e.g. `echo gpt-5.6-terra > .../model.txt`). The
      pin prevents the auto mode from repeatedly trying an inaccessible flagship.
 
-## Step 6 — Copy the skill folders
+## Step 6 — Install the skill folders (symlink preferred)
 
-Copy each chosen skill folder from this repo's `skills/` into the destination
-from Step 1, keeping the folder as-is (SKILL.md resolves its bundled files, e.g.
+**User scope — symlink each chosen skill onto this checkout** (one source of
+truth; updating later = `git pull` in the checkout, no re-install):
+
+```bash
+mkdir -p ~/.claude/skills
+for s in codex-debate codex-check codex-plan; do
+  ln -sfn "$(pwd)/skills/$s" ~/.claude/skills/$s
+done
+```
+
+Requirements: the checkout must stay where it is (moving/deleting it breaks
+the links), and the platform must support symlinks (macOS/Linux always;
+Windows needs Developer Mode or admin — otherwise fall back to copy).
+
+**Copy instead** for project scope, or when symlinks are not an option — keep
+each folder as-is (SKILL.md resolves its bundled files, e.g.
 `review-schema.json`, relative to its own directory):
 
 ```bash
 # project scope
 mkdir -p "<project>/.claude/skills" && cp -R skills/codex-debate "<project>/.claude/skills/"
-# user scope
+# user scope, copy fallback
 mkdir -p ~/.claude/skills && cp -R skills/codex-debate ~/.claude/skills/
 ```
+
+Copied installs are frozen at install time — updating means re-copying after
+`git pull`.
 
 If Step 5 decided on a pin, write it now:
 
 ```bash
 echo <chosen-slug> > "<installed skill dir>/model.txt"
 ```
+
+(With a symlink install this file lands inside the checkout — that is
+expected; `.gitignore` keeps it out of commits.)
 
 ## Step 7 — Smoke test
 
@@ -175,8 +204,9 @@ Tell them, in plain language:
   mode (will pick up future model families automatically) or is pinned via
   `model.txt`. If the flagship was NOT accessible, repeat the advice to request
   access or upgrade the subscription.
-- Which skills were installed and at which scope (restart the Claude Code
-  session for the new skill to appear).
+- Which skills were installed, at which scope, and how they update (symlink
+  install: `git pull` in the checkout; copied install: re-copy after pull).
+  Restart the Claude Code session for new skills to appear.
 - That auth is via their ChatGPT workspace login — reviews consume the plan's
   rolling 5-hour quota, not money per token.
 - Usage: `/codex-debate <task description>`; for review-only of existing
