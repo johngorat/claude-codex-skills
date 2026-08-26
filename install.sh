@@ -551,8 +551,8 @@ def check_mode_120000(skill):
             if not os.path.islink(path):
                 die("tracked symlink %s is checked out as a TEXT PLACEHOLDER "
                     "(core.symlinks=false) — installing it would ship a "
-                    "broken file; re-clone with native symlinks or drop the "
-                    "link from the repo" % parts[3])
+                    "broken file — remedy: re-clone with native symlinks "
+                    "or drop the link from the repo" % parts[3])
 
 def links_work(parent):
     """REAL capability test at the destination: create a DIRECTORY link —

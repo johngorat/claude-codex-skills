@@ -23,6 +23,9 @@ SRCC="$T/srccopy"
 mkdir -p "$SRCC/skills"
 cp "$ROOT/install.sh" "$SRCC/"
 cp -R "$ROOT/skills/codex-check" "$SRCC/skills/codex-check"
+# machine-local state must not leak into the fixture: a real checkout may
+# carry a model.txt pin (gitignored), and tests 30/45 assume its absence
+rm -f "$SRCC/skills/codex-check/model.txt"
 D="$T/dest"
 export XDG_STATE_HOME="$T/state"
 # real link capability of THIS filesystem (some later tests must not key off
@@ -197,6 +200,10 @@ if [ -L "$SRCC/skills/codex-check/linkdir" ]; then
   grep -q "symlink in payload" "$T/e" && ok || bad "directory symlink not named"
   rm "$SRCC/skills/codex-check/linkdir"
 else
+  # MSYS ln -s without symlink privilege leaves a real (empty) DIRECTORY —
+  # inside the source payload it would mutate the identity and fail every
+  # later verify of earlier installs as 'stale copy'
+  rm -rf "$SRCC/skills/codex-check/linkdir"
   printf 'note: no symlinks here — test 16 skipped (2 checks)\n'
   ok; ok
 fi
@@ -325,6 +332,7 @@ if ln -s /tmp "$D19/codex-check/badlink" 2>/dev/null && [ -L "$D19/codex-check/b
   case $po in *"differs from its record"*) ok ;; *) bad "probe does not name the drift: $po" ;; esac
   rm -f "$D19/codex-check/badlink"
 else
+  rm -rf "$D19/codex-check/badlink"   # MSYS ln -s residue (real dir)
   printf 'note: no symlinks here — test 24 skipped (4 checks)\n'
   ok; ok; ok; ok
 fi
@@ -421,7 +429,16 @@ else ok; fi
 find "$D30" -maxdepth 1 -name '.failed-*' -exec rm -rf {} + 2>/dev/null
 
 # ---- 31. a FIFO in the payload refuses instead of hanging the hash -----------------
+fifo_native_ok=0
 if mkfifo "$SRCC/skills/codex-check/fifo" 2>/dev/null && [ -p "$SRCC/skills/codex-check/fifo" ]; then
+  # the hasher sees the payload through NATIVE python: an MSYS-emulated
+  # fifo that python lstat reports as a regular file makes this test
+  # unfalsifiable here — skip loudly (verified where fifos are real)
+  if python3 -c 'import os,stat,sys;sys.exit(0 if stat.S_ISFIFO(os.lstat(sys.argv[1]).st_mode) else 1)' "$SRCC/skills/codex-check/fifo" 2>/dev/null; then
+    fifo_native_ok=1
+  fi
+fi
+if [ "$fifo_native_ok" -eq 1 ]; then
   if bash "$SRCC/install.sh" --dest "$T/d31" --mode copy codex-check >/dev/null 2>"$T/e"; then
     bad "a FIFO in the payload installed"
   else ok; fi
@@ -429,7 +446,7 @@ if mkfifo "$SRCC/skills/codex-check/fifo" 2>/dev/null && [ -p "$SRCC/skills/code
   rm -f "$SRCC/skills/codex-check/fifo"
 else
   rm -f "$SRCC/skills/codex-check/fifo"
-  printf 'note: no mkfifo here — test 31 skipped (2 checks)\n'
+  printf 'note: no native-visible fifo here — test 31 skipped (2 checks)\n'
   ok; ok
 fi
 
@@ -625,8 +642,12 @@ fi
 # ---- 44. a shape-valid record that does not BIND to its name/dest refuses -----------
 S44="$T/state44"
 mkdir -p "$S44/claude-codex-skills"
+# paths go through the NATIVE boundary: python 3.13+ ntpath.isabs()
+# rejects drive-less /tmp forms, which would fail SHAPE before BIND
+src44=$(python3 -c 'import os,sys;sys.stdout.write(os.path.abspath(sys.argv[1]).replace(os.sep,"/"))' "$SRCC")
+dst44=$(python3 -c 'import os,sys;sys.stdout.write(os.path.abspath(sys.argv[1]).replace(os.sep,"/"))' "$T/d44")
 printf '{"schema":1,"skill":"codex-check","mode":"copy","source":"%s","dest":"%s/other","files":{}}' \
-  "$SRCC" "$T/d44" > "$S44/claude-codex-skills/install.codex-check.aaaaaaaaaaaa.v1.json"
+  "$src44" "$dst44" > "$S44/claude-codex-skills/install.codex-check.aaaaaaaaaaaa.v1.json"
 if XDG_STATE_HOME="$S44" bash "$SRCC/install.sh" --verify codex-check >/dev/null 2>"$T/e"; then
   bad "a misbound record passed --verify"
 else ok; fi
