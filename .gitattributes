@@ -1,0 +1,8 @@
+# Line-ending policy: scripts must reach every platform as LF — bash on
+# Windows (MSYS) fails on carriage returns. `text=auto` normalizes what git
+# classifies as text; the explicit rules below are load-bearing regardless of
+# any user's core.autocrlf.
+* text=auto
+*.sh text eol=lf
+*.md text
+*.json text
