@@ -17,13 +17,9 @@ description: One-shot Codex review of the current diff — a single round, no de
 
 ## Model
 
-Default is the **second tier** in the catalog (one below flagship) — fast and quota-cheap, adequate for a single advisory pass:
-
-```bash
-MODEL=$(jq -r '[.models[] | select(.visibility=="list")] | sort_by(.priority) | .[1].slug // .[0].slug' ~/.codex/models_cache.json)
-```
-
-Overrides, strongest first: a model named in the invocation ("use sol", "on luna") → `model.txt` next to this SKILL.md → the default above. Effort is `medium`; bump to `high` only if the user asks for a deeper pass.
+Environment first, once per session: `bash "<skill dir>/scripts/env-probe.sh"` — silent exit 0 means healthy; on failure follow its printed remedies.
+Then resolve: `bash "<skill dir>/scripts/resolve-model.sh" check` prints `<slug>	<source>` (second tier — fast, quota-cheap, adequate for a single advisory pass); pass the user-named slug as a second argument only when the invocation names a model or tier. State `model=<slug> source=<source>` in the report.
+On refusal (exit 1), follow the script's printed bootstrap verbatim — it is the ONLY pin-writing protocol; never pick or guess a model yourself. Effort is `medium`; bump to `high` only if the user asks for a deeper pass.
 
 ## Hard Rules
 
@@ -32,7 +28,7 @@ Overrides, strongest first: a model named in the invocation ("use sol", "on luna
 - **One codex call total.** No resume, no rounds. Escalation happens through `/codex-debate`, not by extending this skill.
 - Run the `codex` command with the Bash tool `timeout` set to `300000` ms. On a hang, kill and retry once. For large diffs (roughly 1,000+ changed lines) a single pass can outlive a foreground call — build `$RUN_DIR/round.input` (prompt + diff) and launch via the bundled `scripts/review-round.sh` (detached + poll; fails fast on an empty diff), then poll `$RUN_DIR/pid` and parse `$RUN_DIR/verdict.json`.
 - Scratch files live in a per-run `mktemp` dir — never fixed shared paths.
-- On a rate-limit/quota error, report it and stop.
+- On a rate-limit/quota, **authentication (401)**, or **model-access** error, report it with the USER's remedy and stop — retry nothing, never relaunch after credential remediation without the user asking, never substitute another model silently.
 
 ## Workflow
 
@@ -55,7 +51,7 @@ git diff --unified=5 "$BASE" | codex exec \
   --output-schema "$SCHEMA" \
   -o "$RUN_DIR/verdict.json" \
   "<review prompt>" | tee "$RUN_DIR/events.jsonl" | tail -3
-jq . "$RUN_DIR/verdict.json"
+PYTHONIOENCODING=utf-8 python3 -m json.tool "$RUN_DIR/verdict.json"
 ```
 
 (`tee` keeps the events log — its `turn.completed` usage feeds the codex-plan

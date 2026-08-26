@@ -100,10 +100,11 @@ All probes run from inside a git directory, Bash timeout ≥ 180000 ms.
    echo "" | codex exec --sandbox read-only --json "Reply with exactly: OK" 2>&1 | tail -3
    ```
 
-2. **List what the CLI sees**, best tier first (lower `priority` = higher tier):
+2. **List the candidates with their validation evidence** (the resolver owns
+   all catalog parsing — no external JSON tool is involved):
 
    ```bash
-   jq -r '[.models[] | select(.visibility=="list")] | sort_by(.priority) | .[] | "\(.slug) — \(.description)"' ~/.codex/models_cache.json
+   bash <skill dir>/scripts/resolve-model.sh --propose debate
    ```
 
 3. **Live-probe the top entry** — a catalog listing does not guarantee plan

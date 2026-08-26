@@ -27,6 +27,26 @@ RUN_DIR=$1; MODEL=$2; EFFORT=$3; SCHEMA=$4; THREAD_ID=${5:-}
 [ -s "$RUN_DIR/round.input" ] || { echo "ERROR: $RUN_DIR/round.input missing or empty — nothing to review" >&2; exit 2; }
 [ -s "$SCHEMA" ] || { echo "ERROR: schema not found: $SCHEMA" >&2; exit 2; }
 
+# One model per run: the FIRST launch records the resolved slug; every later
+# launch — resume OR a re-run of round 1 in the same run dir — must present
+# the same one. A model switch mid-run is always a bug or a silent fallback —
+# both are hard errors, never absorbed, and the record is created only when
+# absent so a retry can never overwrite it. A resume with NO recorded model
+# is equally hard: without the record the comparison cannot happen, and
+# accepting the caller's word re-opens the silent-switch hole.
+if [ -s "$RUN_DIR/model" ]; then
+  PINNED=$(cat "$RUN_DIR/model")
+  if [ "$PINNED" != "$MODEL" ]; then
+    echo "ERROR: model '$MODEL' differs from this run's recorded model '$PINNED' — pass '$PINNED' (one resolution per run) or start a fresh run dir" >&2
+    exit 2
+  fi
+elif [ -n "$THREAD_ID" ]; then
+  echo "ERROR: resume round but $RUN_DIR/model is missing or empty — round 1 records the run's model and a resume may not re-choose it. Restore the original run dir or start a fresh debate" >&2
+  exit 2
+else
+  printf '%s\n' "$MODEL" > "$RUN_DIR/model"
+fi
+
 # Rotate previous round's artifacts instead of truncating them: token usage in
 # the events logs feeds the end-of-run scorecard, so every round must survive.
 N=$(find "$RUN_DIR" -maxdepth 1 -name 'events.r*.jsonl' | wc -l | tr -d ' ')   # find, not ls: zero matches must not trip pipefail

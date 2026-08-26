@@ -13,21 +13,9 @@ If the work is already done and only a review is wanted, skip step 2 and start a
 
 ## Model Selection
 
-Resolve `$MODEL` once at the start of the loop, in this order:
-
-1. **User override** — if the invocation names a model or tier ("use terra", "on luna", "with 5.5"), map it to the slug (`gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, …) and use that.
-2. **Pinned model** — if a `model.txt` exists next to this SKILL.md, use its contents (written by the installer or the user to save quota).
-3. **Auto (default)** — the top tier the CLI knows about:
-
-```bash
-MODEL=$(jq -r '[.models[] | select(.visibility=="list")] | sort_by(.priority) | .[0].slug' ~/.codex/models_cache.json)
-```
-
-Lower `priority` = higher tier (1 = flagship). The cache refreshes whenever codex runs, so new families (5.7, 5.8, …) are picked up automatically.
-
-If a codex call fails with a **model-access error** mid-loop, step down to the next slug by ascending priority and continue; in the final report state which model actually reviewed, and advise the user to request top-tier access from their ChatGPT workspace admin or upgrade the subscription.
-
-Always state the resolved model in the final report.
+Environment first, once per session: `bash "<skill dir>/scripts/env-probe.sh"` — silent exit 0 means healthy; on failure follow its printed remedies.
+Then resolve once per debate: `bash "<skill dir>/scripts/resolve-model.sh" debate` prints `<slug>	<source>`; pass the user-named slug as a second argument only when the invocation names a model or tier ("use terra" → `gpt-5.6-terra`). Use that slug as `$MODEL` and state `model=<slug> source=<source>` in the final report.
+On refusal (exit 1), follow the script's printed bootstrap verbatim — it is the ONLY pin-writing protocol; never pick or guess a model yourself.
 
 ## Hard Rules
 
@@ -36,7 +24,7 @@ Always state the resolved model in the final report.
 - Max **5 review rounds**, plus at most ONE confirmation-only overflow round when a delta APPROVED lands exactly on round 5 (see step 6) — the overflow may only confirm or fail the gate, never debate. A debated-and-unchanged diff is never re-submitted **in response to a REVISE** — if nothing changed since the last round, stop and report the divergence instead of looping. (The confirmation round's full-diff resubmission after a delta APPROVED is the explicit, sanctioned exception.)
 - Review rounds run **detached** (`nohup … &` + polling — see step 3). Never run a round in a foreground Bash call and never rely on the harness's background-task tracking: a review of a non-trivial diff legitimately outlives the foreground ceiling, and tracked background tasks have been observed killed within a minute. Foreground with `timeout: 300000` is only for quick probes and smoke tests.
 - Distinguish **overrun** from **hang**: while the events log grows, the round is working — wait, never retry (a retry burns a full quota pass to hit the same wall). No event growth for 10 minutes = hang → kill, retry once.
-- On a rate-limit/quota error (rolling 5-hour window), stop the loop, surface whatever `remaining`/`resetsAt` info the error JSONL carries, and tell the user.
+- On a rate-limit/quota error (rolling 5-hour window), an **authentication error (401)**, or a **model-access error**, stop the loop — hard non-approval. Surface whatever `remaining`/`resetsAt` info the error JSONL carries and the remedy for the USER (wait out the window / re-login / request tier access). Retry NOTHING automatically, never relaunch after credential remediation without the user asking, and never step down to another model silently.
 - All scratch files live in the per-run `$RUN_DIR` created in step 1. **Never use fixed shared paths** (e.g. `/tmp/codex-debate-*.json`) — concurrent debates in different sessions on the same machine would clobber each other's verdicts.
 
 ## Workflow
@@ -95,8 +83,12 @@ Review prompt template:
 Then extract:
 
 ```bash
-THREAD_ID=$(jq -r 'select(.type=="thread.started").thread_id' "$RUN_DIR/events.jsonl")
-jq . "$RUN_DIR/verdict.json"    # {verdict, summary, findings[]}
+THREAD_ID=$(PYTHONIOENCODING=utf-8 python3 -c 'import json,sys
+for line in open(sys.argv[1], encoding="utf-8"):
+    e = json.loads(line)
+    if e.get("type") == "thread.started":
+        print(e["thread_id"]); break' "$RUN_DIR/events.jsonl")
+PYTHONIOENCODING=utf-8 python3 -m json.tool "$RUN_DIR/verdict.json"    # {verdict, summary, findings[]}
 ```
 
 Keep `THREAD_ID` for all later rounds (explicit UUID, never `--last`).
@@ -116,6 +108,9 @@ Project conventions (CLAUDE.md, docs/) outrank reviewer taste — convention con
 Same script, with the thread id as the fifth argument — that is what switches it
 to `codex exec resume` with the correct flag set (`resume` has no `--sandbox` and
 takes options only before the session id; the script owns those details).
+In later Bash calls re-derive the model as `MODEL=$(cat "$RUN_DIR/model")` —
+round 1 wrote it there, and the script enforces ONE model per run (a mismatching
+model on a resume round is a hard error, never a silent switch).
 
 **Delta rounds (default).** Middle rounds do NOT resend the full diff — the
 thread already holds it, and full resends were measured ballooning a single gate
@@ -196,7 +191,7 @@ Default effort is `xhigh`. For a final gate on a risky change, one round at `-c 
   harness-tracked. Relaunch detached per step 3 (`nohup … &` + poll). A growing
   events log is an overrun, not a hang — wait, don't retry.
 - `codex login status` prints to **stderr** — check both streams for "Logged in".
-- 401 `require_sso_login` → `codex logout && codex login`.
+- 401 `require_sso_login` → the gate has hard-stopped; USER remedy: `codex logout && codex login`, then restart the gate manually.
 - "model requires a newer version of Codex" → `npm install -g @openai/codex@latest`.
-- Available models: `jq -r '.models[].slug' ~/.codex/models_cache.json`.
-- Reviews too slow / quota too tight → pin a cheaper tier: `echo gpt-5.6-terra > <skill dir>/model.txt` (delete the file to return to auto top-tier).
+- Available models + validation evidence: `bash "<skill dir>/scripts/resolve-model.sh" --propose debate`.
+- Reviews too slow / quota too tight → `bash "<skill dir>/scripts/resolve-model.sh" --propose debate` prints the candidates and the pinning protocol.
