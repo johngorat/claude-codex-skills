@@ -6,8 +6,9 @@
 > **To Claude executing this runbook:** work through the steps in order,
 > autonomously. Verify every step's outcome before moving on; adapt commands to
 > the host OS. The only steps that need the human are the scope choice (Step 1),
-> the interactive `codex login`, and any system-level package install (ask
-> first). Never use `--dangerously-bypass-approvals-and-sandbox` in any codex
+> the interactive `codex login`, any system-level package install (ask first),
+> and the model-pin confirmation (Step 6 — never write a pin unconfirmed).
+> Never use `--dangerously-bypass-approvals-and-sandbox` in any codex
 > invocation.
 
 ## What you are setting up
@@ -33,42 +34,47 @@ tokens draw from the plan's rolling 5-hour quota window, not a per-token bill.
 
 ## Step 1 — Ask the human: install scope
 
-Ask which scope they want (and which skills, if more than one exists in
-`skills/`):
-
+- **User scope** (default) — `~/.claude/skills/` (Windows:
+  `%USERPROFILE%\.claude\skills`) — available in every project on this
+  machine, personal to this user.
 - **Project scope** — `<project>/.claude/skills/` — the skill exists only in
   that project and travels with its repo (teammates get it on clone if
-  committed).
-- **User scope** — `~/.claude/skills/` (Windows: `%USERPROFILE%\.claude\skills`)
-  — available in every project on this machine, personal to this user.
+  committed). With the installer below that is just `--dest
+  <project>/.claude/skills`.
 
-## Step 2 — Preflight
+## Step 2 — Prerequisites (all declared, all capability-tested later)
 
-1. Detect OS (macOS / Windows / Linux) and shell. On Windows, Claude Code runs
-   commands through Git Bash — `/tmp` exists there and maps to the user temp
-   dir, so the skills' `/tmp/...` paths work as-is. If `/tmp` turns out not
-   writable, substitute a writable temp dir in the copied SKILL.md.
-2. For **project scope**: confirm the target project is a git repository
-   (`git rev-parse --git-dir`). Codex refuses non-git dirs and the skill depends
-   on `git diff`. For **user scope**: the skill still only *runs* inside git
-   projects; no check needed at install time.
-3. Confirm `node`/`npm` exist (`node -v` — need Node ≥ 22). If missing, ask the
-   human before installing (macOS: `brew install node`; Windows: winget/nvm).
+| Tool | Why | Notes |
+|---|---|---|
+| bash | every script runs as `bash <script>` | macOS ships 3.2 — that IS the floor; Windows: Git Bash (Claude Code uses it anyway) |
+| git | diffs, identity hashing | any recent version |
+| python3 ≥ 3.9 | all installer/resolver logic | must resolve as `python3` (macOS: `xcode-select --install`; Windows: python.org installer — NOT the Store alias) |
+| codex CLI ≥ 0.145.0 | the reviewer | two channels, Step 3 |
+| Node ≥ 22 | ONLY for the npm codex channel | not needed with the standalone package |
 
-## Step 3 — Codex CLI
+No `jq` and no other JSON tool is needed anywhere — the scripts parse with
+python3 only. Version floors are enforced where they bite: `codex --version`
+in Step 3, Node during the npm install, python3 by `install.sh` itself
+(refuses below 3.9). Step 5 then verifies CAPABILITIES and payload health
+(not version numbers) — so do not over-verify here.
+
+## Step 3 — Codex CLI (two channels)
 
 ```bash
 codex --version
 ```
 
-- **Not installed** → `npm install -g @openai/codex@latest` (unified path for
-  macOS/Windows/Linux). Re-check `codex --version`.
-- **Installed but < 0.145.0** → upgrade. Find the install method first:
-  `npm ls -g @openai/codex` (npm-global → upgrade via npm, even if the binary
-  lives under a Homebrew path — it may be a symlink into npm's tree;
-  `brew upgrade codex` will NOT work for those). Only use brew/winget if it was
-  actually installed that way.
-- Version ≥ 0.145.0 is required for the `gpt-5.6-sol` model.
+- **Not installed** → either channel works; pick what fits the machine:
+  - **npm channel** (macOS/Linux, or Windows with Node):
+    `npm install -g @openai/codex@latest`
+  - **standalone channel** (Windows without Node): the platform package from
+    the Codex release page — no Node required at all.
+- **Installed but < 0.145.0** → upgrade THROUGH ITS OWN CHANNEL. Find it
+  first: `npm ls -g @openai/codex` — if it is npm-global, upgrade via npm even
+  when the binary sits under a Homebrew path (it may be a symlink into npm's
+  tree; `brew upgrade codex` will NOT work for those). A standalone install
+  updates via its own updater/package, never via npm.
+- Version ≥ 0.145.0 is required for the `gpt-5.6` model family.
 
 ## Step 4 — Auth (interactive — hand to the human)
 
@@ -90,92 +96,140 @@ ChatGPT workspace. Known failure modes:
 | 401 `require_sso_login` after SSO refresh | `codex logout && codex login` |
 | No browser (headless/remote) | `codex login --device-auth` |
 
-## Step 5 — Discover available models, verify the top tier, let the human choose
+## Step 5 — Environment probe (one command proves the machine)
 
-All probes run from inside a git directory, Bash timeout ≥ 180000 ms.
+```bash
+bash skills/codex-debate/scripts/env-probe.sh
+```
 
-1. **Refresh the model catalog** (it updates whenever codex runs):
+Silent with exit 0 = the machine is healthy: bash entrypoint, git, a REAL
+python3 (JSON + UTF-8 capability, not a Store alias), a codex install whose
+ACTIVE payload actually matches this machine (on the npm channel that includes
+Node and the platform-correct native binary), writable temp and cache, and —
+once skills are installed — the installation records (Step 8). It checks
+capabilities, never version numbers, and never invokes codex. Every failure
+is one line on stderr naming the exact remedy; fix and re-run until silent.
+The skills themselves run this probe as their declared once-per-session
+prerequisite.
+
+## Step 6 — Models: resolve, verify, let the human choose
+
+The skills resolve their reviewer model through a strict ladder — explicit
+override (`use terra` in the invocation) → machine-local pin
+(`<skill dir>/model.txt`) → catalog → role map — and **REFUSE with a guided
+bootstrap when nothing resolves**. They never guess, never silently fall back
+to another model, and never write a pin by themselves.
+
+1. On the npm channel the catalog cache refreshes whenever codex runs; warm it
+   once (also a live smoke of the CLI):
 
    ```bash
    echo "" | codex exec --sandbox read-only --json "Reply with exactly: OK" 2>&1 | tail -3
    ```
 
-2. **List the candidates with their validation evidence** (the resolver owns
-   all catalog parsing — no external JSON tool is involved):
+2. List validated candidates with their evidence (all parsing is inside the
+   resolver):
 
    ```bash
-   bash <skill dir>/scripts/resolve-model.sh --propose debate
+   bash skills/codex-debate/scripts/resolve-model.sh --propose debate
    ```
 
-3. **Live-probe the top entry** — a catalog listing does not guarantee plan
+3. Live-probe the top candidate — a catalog listing does not guarantee plan
    access:
 
    ```bash
    echo "" | codex exec -m <top-slug> --sandbox read-only --json "Reply with exactly: OK" 2>&1 | tail -6
    ```
 
-   - `agent_message` with `OK` → top tier verified.
-   - "requires a newer version of Codex" → redo Step 3 upgrade, probe again.
-   - Model-access / plan error → **tell the human plainly**: the top-tier model
-     is not available on this plan/workspace, and they should ask their ChatGPT
-     workspace admin for access or upgrade the subscription to get the strongest
-     reviewer. Then probe the next slugs in priority order (e.g. terra → luna →
-     gpt-5.5) until one verifies.
+   - `agent_message` with `OK` → verified.
+   - "requires a newer version of Codex" → redo Step 3's upgrade, probe again.
+   - Model-access / plan error → tell the human plainly: the top tier is not
+     available on this plan/workspace (they can ask the workspace admin or
+     upgrade); probe the next candidates in order until one verifies.
    - Rate-limit error → the 5-hour quota window is exhausted; wait and retry.
 
-4. **Ask the human to choose** among the verified models. Recommend the best
-   verified tier for the reviewer role; mention that cheaper tiers (terra/luna)
-   review faster and burn less quota, at the cost of shallower critique.
+4. Present the verified candidates and let the human choose (cheaper tiers
+   review faster and burn less quota, at the cost of shallower critique).
 
-5. Remember the choice for Step 6:
-   - Best verified tier chosen and it equals the catalog top → **no pin**: the
-     skill's auto mode always resolves the top catalog entry, so it will pick up
-     future families (5.7, 5.8, …) automatically.
-   - Anything else chosen (or the catalog top is NOT accessible on this plan) →
-     **pin it**: after copying the skill, write the slug into
-     `<skill dir>/model.txt` (e.g. `echo gpt-5.6-terra > .../model.txt`). The
-     pin prevents the auto mode from repeatedly trying an inaccessible flagship.
+5. Pin rule — **a pin is written only on the human's explicit confirmation**:
+   - Choice = the verified catalog top → **no pin**; auto mode follows the
+     catalog and picks up future families (5.7, 5.8, …) by itself.
+   - Any other choice, or the flagship is not accessible on this plan →
+     confirm with the human, then (after Step 7) write the slug into the
+     INSTALLED skill dir: `echo <slug> > <installed skill dir>/model.txt`.
+   - If a skill later refuses with "no model resolves", that refusal prints
+     this same bootstrap: run `--propose`, confirm a listed candidate with
+     the human, write the pin — the only sanctioned way a pin comes into
+     existence. When `--propose` itself reports NO candidates (no catalog
+     and no role map to validate against), a pin cannot help: restore a
+     naming source first, exactly as its printed remedy says (usually
+     reinstall/update codex), then rerun the resolver.
 
-## Step 6 — Install the skill folders (symlink preferred)
+## Step 7 — Install the skills (the installer owns this step)
 
-**User scope — symlink each chosen skill onto this checkout** (one source of
-truth; updating later = `git pull` in the checkout, no re-install):
-
-```bash
-mkdir -p ~/.claude/skills
-for s in codex-debate codex-check codex-plan; do
-  ln -sfn "$(pwd)/skills/$s" ~/.claude/skills/$s
-done
-```
-
-Requirements: the checkout must stay where it is (moving/deleting it breaks
-the links), and the platform must support symlinks (macOS/Linux always;
-Windows needs Developer Mode or admin — otherwise fall back to copy).
-
-**Copy instead** for project scope, or when symlinks are not an option — keep
-each folder as-is (SKILL.md resolves its bundled files, e.g.
-`review-schema.json`, relative to its own directory):
+From the repo root:
 
 ```bash
-# project scope
-mkdir -p "<project>/.claude/skills" && cp -R skills/codex-debate "<project>/.claude/skills/"
-# user scope, copy fallback
-mkdir -p ~/.claude/skills && cp -R skills/codex-debate ~/.claude/skills/
+bash install.sh                                   # all skills → ~/.claude/skills, mode auto
+bash install.sh --dest <dir> --mode copy <skill>  # explicit dest/mode/skill selection
 ```
 
-Copied installs are frozen at install time — updating means re-copying after
-`git pull`.
+- Modes: `copy` is the PRIMARY mode (no privileges needed anywhere);
+  `symlink` is an optimization where links really work; `auto` (default) picks
+  by performing a REAL directory-link capability test at the destination —
+  never by guessing from git config. A symlink install updates via `git pull`
+  alone; a copy install updates via `--refresh` (below).
+- The install is transactional (stage → verify bytes → activate; the previous
+  installation survives as a backup until the new one is verified AND
+  recorded; failures roll back and say exactly what happened). Concurrent
+  installs serialize on a lock.
+- Each install writes a record OUTSIDE both the checkout and the destination
+  (`${XDG_STATE_HOME:-~/.local/state}/claude-codex-skills/`) holding the
+  canonical source location and per-file content identities — that record is
+  what makes staleness DETECTABLE, not just fixable.
+- A `model.txt` pin in the destination survives every refresh and mode
+  switch; if both sides of a mode switch carry DIFFERENT pins, the installer
+  refuses and tells the human to reconcile.
 
-If Step 5 decided on a pin, write it now:
+Restart the Claude Code session afterwards so new skills register.
+
+## Step 8 — The staleness contract (what guards the install from now on)
 
 ```bash
-echo <chosen-slug> > "<installed skill dir>/model.txt"
+bash install.sh --verify            # all recorded installs, both sides checked
+bash install.sh --refresh           # transactional update of copy installs
 ```
 
-(With a symlink install this file lands inside the checkout — that is
-expected; `.gitignore` keeps it out of commits.)
+`--verify` — and the record check inside `env-probe.sh`, which the skills run
+as their once-per-session prerequisite — recheck both sides and fail closed.
+What each loud failure means:
 
-## Step 7 — Smoke test
+| Message contains | Meaning | Remedy (always printed with it) |
+|---|---|---|
+| `stale copy` / `source checkout changed` | the recorded source content changed — upstream update, a local edit, or corruption | look at what changed in the source first, then `bash install.sh --refresh <skill>` (refresh installs whatever the source NOW contains) |
+| `differs from its record` | the installed copy was edited or corrupted | `--refresh` (restores from source) |
+| `moved or disappeared` / `no longer canonical` / `aliased` | the recorded source or destination path is not the real location anymore | reinstall from/into the real location |
+| `record says COPY but ... symlink` | someone replaced the installed tree | remove it and reinstall |
+| `malformed` / `unreadable` / `does not BIND` (record) | the installation record itself is damaged | delete that record file and reinstall the skill |
+| `holds the lock` | another install/refresh is running | wait for it, retry |
+| `carry a model.txt and they DIFFER` | two conflicting pins on a mode switch | keep one of the two named files, re-run |
+| `pin must be a regular file` | the pin is a symlink/special file | replace it with a plain file |
+| `unsupported special file` | a FIFO/socket/device sits in the payload | remove it from the skill |
+
+Reviewer staleness (is the MODEL current, not the files) is a separate,
+report-only check — run it against the INSTALLED skill (the pin it inspects
+is the `model.txt` next to its own script directory):
+
+```bash
+bash <installed skill dir>/scripts/preflight-model.sh
+```
+
+Silent = fresh. Otherwise it prints ONE machine-readable line naming the stale
+class — `map-missing`, `pin-unknown-to-map`, `update-not-active`,
+`running-version-differs` — each with its exact remedy. It never updates codex
+itself (updating the reviewer mid-gate would change the instrument).
+
+## Step 9 — Smoke test
 
 From inside a git project (Bash timeout 300000 ms), with `$SCHEMA` pointing at
 the installed `review-schema.json`:
@@ -194,20 +248,23 @@ cat "$V"
 with a debate running in another session on the same machine.)
 
 Expected: `{"verdict":"APPROVED","summary":"...","findings":[]}`.
-(`<verified-slug>` = the model chosen in Step 5.)
+(`<verified-slug>` = the model chosen in Step 6.)
 
-## Step 8 — Report to the human
+## Step 10 — Report to the human
 
 Tell them, in plain language:
 
-- Codex CLI version installed/upgraded and where it came from.
-- Which model was chosen and verified — and whether it runs in auto top-tier
-  mode (will pick up future model families automatically) or is pinned via
-  `model.txt`. If the flagship was NOT accessible, repeat the advice to request
-  access or upgrade the subscription.
-- Which skills were installed, at which scope, and how they update (symlink
-  install: `git pull` in the checkout; copied install: re-copy after pull).
-  Restart the Claude Code session for new skills to appear.
+- Codex CLI version, and WHICH CHANNEL it came from (npm / standalone) — that
+  channel is also its upgrade path.
+- Which model was verified and chosen — auto top-tier (follows future
+  families automatically) or pinned via `model.txt` (and that the pin was
+  written on their confirmation). If the flagship was not accessible, repeat
+  the advice to request access or upgrade the subscription.
+- Which skills were installed, at which scope, and WHICH MODE the capability
+  test picked — symlink (update = `git pull` in the checkout) or copy
+  (update = `git pull` + `bash install.sh --refresh`); either way,
+  `--verify` and the entry-time probe will catch a stale or corrupted
+  install before any quota is spent on it.
 - That auth is via their ChatGPT workspace login — reviews consume the plan's
   rolling 5-hour quota, not money per token.
 - Usage: `/codex-debate <task description>`; for review-only of existing

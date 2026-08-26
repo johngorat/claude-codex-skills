@@ -68,13 +68,15 @@ Task-sharpened packs (e.g. an engine-to-engine porting pipeline) build ON TOP
 of this generic family — their gates invoke `codex-debate`/`codex-check` and
 their planning follows `codex-plan` — while the generic family stays pure and
 never references any pack or its conventions. Packs live in their own
-repositories and install the same way: symlink each pack skill folder into
-`~/.claude/skills/` alongside the generic three.
+repositories and install the same way — copy or symlink each pack skill
+folder into `~/.claude/skills/` alongside the generic three.
 
 ## Requirements
 
 - [Claude Code](https://claude.com/claude-code) (CLI, desktop, or IDE extension)
-- git, Node ≥ 22
+- git, bash (macOS's 3.2 is fine; Windows: Git Bash), python3 ≥ 3.9
+- Node ≥ 22 — only if you install codex through npm; the standalone codex
+  package needs no Node
 - A ChatGPT plan with Codex enabled (Free/Plus/Pro/Business/Edu/Enterprise).
   Company workspaces: an admin must have **"Allow members to use Codex Local"**
   switched on at chatgpt.com/admin/settings.
@@ -92,13 +94,14 @@ follow INSTALL.md from <path to this repo>
 ```
 
 Claude works through [INSTALL.md](INSTALL.md) adaptively: detects your OS
-(macOS/Windows/Linux), installs or upgrades the Codex CLI (≥ 0.145.0 via
-`npm install -g @openai/codex@latest`), walks you through `codex login`,
-discovers which models your plan actually has (Sol / Terra / Luna / 5.5 …),
-live-verifies the top tier and lets you pick — if the flagship isn't available
-it tells you and suggests requesting access from your workspace admin or
-upgrading the subscription — then copies the skill and runs a smoke test.
-You'll also be asked the install scope:
+(macOS/Windows/Linux), installs or upgrades the Codex CLI (≥ 0.145.0; npm or
+the standalone package — upgrades go through whichever channel installed it),
+walks you through `codex login`, discovers which models your plan actually has
+(Sol / Terra / Luna / 5.5 …), live-verifies the top tier and lets you pick —
+if the flagship isn't available it tells you and suggests requesting access
+from your workspace admin or upgrading the subscription — then runs the
+bundled transactional installer (`install.sh`) and a smoke test. You'll also
+be asked the install scope:
 
 - **Project** — `<project>/.claude/skills/` — travels with that repo, teammates
   get it on clone if committed.
@@ -109,34 +112,48 @@ You'll also be asked the install scope:
 
 ```bash
 # 1. Codex CLI + login (once per machine)
-npm install -g @openai/codex@latest
+npm install -g @openai/codex@latest  # or the standalone package (no Node needed)
 codex login                          # browser OAuth into your ChatGPT workspace
 
-# 2. Copy the skill — pick ONE scope
-cp -R skills/codex-debate  <your-project>/.claude/skills/   # project scope
-cp -R skills/codex-debate  ~/.claude/skills/                # user scope
+# 2. Install the skills — transactional, records what it installed
+bash install.sh                                            # user scope, all skills
+bash install.sh --dest <project>/.claude/skills codex-debate   # project scope, one skill
 
-# 3. Restart your Claude Code session so the skill registers
+# 3. Restart your Claude Code session so the skills register
 ```
+
+`install.sh` picks copy or symlink by a real capability test at the
+destination (copy is the primary mode — no privileges needed). Later:
+`bash install.sh --verify` checks every recorded install against both its
+record and the source; `bash install.sh --refresh` updates copy installs
+transactionally (symlink installs update via `git pull` alone). The skills'
+own once-per-session environment probe re-runs the same record check, so a
+stale or corrupted install is caught before review quota is spent on it.
 
 ## Model selection
 
-By default the skill runs in **auto top-tier mode**: at the start of every
-debate it resolves the highest-tier model the Codex CLI knows about (from
-`~/.codex/models_cache.json`, sorted by priority). Today that's `gpt-5.6-sol`;
-when 5.7/5.8 families ship, it upgrades itself — no skill edit needed.
+Each run resolves its reviewer through a strict ladder — strongest source
+first:
 
-Overrides, strongest first:
+1. **Per-invocation override** — `/codex-debate ... use terra` (or `luna`,
+   `5.5`).
+2. **Pin** — a `model.txt` in the skill dir locks a specific validated slug
+   (e.g. a cheaper tier to save quota; delete the file to return to auto).
+   Pins are only ever written with your explicit confirmation — nothing
+   creates one silently.
+3. **Auto** — the top validated catalog tier. Today that's `gpt-5.6-sol`;
+   when 5.7/5.8 families ship, auto picks them up — no skill edit needed.
 
-1. **Per-invocation** — `/codex-debate ... use terra` (or `luna`, `5.5`).
-2. **Pin** — `echo gpt-5.6-terra > <skill dir>/model.txt` to lock a cheaper
-   tier (saves quota; delete the file to return to auto). The installer writes
-   this pin automatically when the flagship isn't accessible on your plan.
-3. **Auto** — top catalog tier, as above.
+When nothing resolves (no override, no pin, no usable catalog), the skill
+**refuses to run** and prints a guided bootstrap: validated candidates with
+evidence, and how to confirm one as the pin. It never guesses a model and
+never silently substitutes another one mid-review — a model-access or quota
+failure is a hard stop with the remedy named, not a downgrade.
 
-If a model turns out inaccessible mid-loop, the skill steps down to the next
-tier, finishes the review, and tells you — with the advice to request flagship
-access or upgrade the subscription.
+Reviewer freshness is checked separately:
+`bash <skill dir>/scripts/preflight-model.sh` is silent when everything is
+current and otherwise prints one line naming what is stale (catalog map, pin,
+codex binary) and its exact remedy — it reports only, never updates anything.
 
 ## Usage
 
@@ -174,7 +191,10 @@ why, or — on deadlock — both sides' positions so you can decide.
 | `403 - Unauthorized. Contact your ChatGPT administrator` | Admin must enable "Allow members to use Codex Local" |
 | `Error 400: No eligible ChatGPT workspaces found` | Same admin toggle — workspace not Codex-enabled |
 | 401 `require_sso_login` | `codex logout && codex login` |
-| "model requires a newer version of Codex" | `npm install -g @openai/codex@latest` |
+| "model requires a newer version of Codex" | upgrade through the channel that installed it: `npm install -g @openai/codex@latest`, or the standalone package's own updater |
+| A skill refuses with "no model resolves" | `bash <installed skill dir>/scripts/resolve-model.sh --propose debate`; if it lists candidates, confirm one and write it to `<installed skill dir>/model.txt` — if it lists NONE, restore a naming source first (its printed remedy; usually reinstall/update codex) |
+| Reviews feel stale (old model family) | `bash <installed skill dir>/scripts/preflight-model.sh` — silent means fresh; otherwise one line names what is stale and the fix |
+| Installed skill behaves oddly / files differ | `bash install.sh --verify` names the drift and its remedy; `--refresh` fixes copy installs |
 | Rate-limit mid-debate | Plan quota (rolling 5-hour window) exhausted — the loop stops cleanly; retry later |
 | Review of a big diff dies at the Bash timeout; background run killed in ~a minute | Run the round detached (`nohup … &`) and poll its events log — `codex-debate` step 3. A growing log means it's working: wait, don't retry |
 | Round 2+ fails with `unexpected argument '--sandbox'` | `codex exec resume` takes options **before** the session id and has no `--sandbox` — use `-c sandbox_mode='"read-only"'` (see `codex-debate` step 5) |
