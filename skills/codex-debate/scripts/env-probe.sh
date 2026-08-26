@@ -197,4 +197,218 @@ else
   fail=1
 fi
 
+# installation record (written by install.sh) — recheck BOTH sides at every
+# entry: an installed COPY that drifted from its record (corruption) or whose
+# source checkout moved on (staleness) must be BLOCKED here, before any gate
+# spends quota on it. The record lives OUTSIDE both trees (XDG_STATE_HOME).
+# FAIL-CLOSED: the checker must end with an explicit OK — an absent state
+# dir or no matching record IS an OK (plain checkout / manual install), but
+# a crash, a permission error or an unreadable file is a blocking failure,
+# never silence.
+if [ "$py_ok" -eq 1 ]; then
+  # records store dest as CANONICAL-parent + skill name (the skill dir
+  # itself may legitimately be a symlink in symlink mode) — so the probe
+  # must compare the PHYSICAL parent (pwd -P) joined with the LOGICAL
+  # skill-dir name, or an aliased parent would silently match nothing
+  _skill_logical=$(cd "$(dirname "$0")/.." && pwd)
+  SKILL_ROOT="$(cd "$_skill_logical/.." && pwd -P)/$(basename "$_skill_logical")"
+  rec_out=$(PYTHONIOENCODING=utf-8 python3 -c '
+import errno, hashlib, json, os, re, stat, sys
+skill_dir = os.path.normcase(os.path.normpath(sys.argv[1]))
+# XDG semantics, IDENTICAL to install.sh: a relative XDG_STATE_HOME is
+# invalid and ignored — resolving it against the CWD would make the probe
+# and the installer look at different state directories.
+_xdg = os.environ.get("XDG_STATE_HOME") or ""
+_base = _xdg if os.path.isabs(_xdg) else os.path.join(
+    os.path.expanduser("~"), ".local", "state")
+state_dir = os.path.realpath(os.path.join(_base, "claude-codex-skills"))
+ALLOW = ("model.txt",)
+NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+IDENTITY_RE = re.compile(r"^([0-9a-f]{64}|link:.*)$")
+def shape_ok(rec):
+    return (isinstance(rec, dict) and rec.get("schema") == 1
+            and all(isinstance(rec.get(k), str)
+                    for k in ("skill", "mode", "source", "dest"))
+            and NAME_RE.match(rec["skill"])
+            and rec["mode"] in ("copy", "symlink")
+            and os.path.isabs(rec["source"]) and os.path.isabs(rec["dest"])
+            and isinstance(rec.get("files"), dict)
+            and all(isinstance(k, str) and isinstance(v, str)
+                    and IDENTITY_RE.match(v)
+                    for k, v in rec["files"].items()))
+def sha(p):
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for c in iter(lambda: f.read(1 << 20), b""):
+            h.update(c)
+    return h.hexdigest()
+def _raise(e):
+    raise e   # an unscannable subtree must FAIL the check, never slim the map
+def tree(root):
+    out = {}
+    for cur, dirs, files in os.walk(root, onerror=_raise):
+        for d in list(dirs):
+            p = os.path.join(cur, d)
+            rel = os.path.relpath(p, root).replace(os.sep, "/")
+            if rel in ALLOW:
+                # a DIRECTORY (or dir symlink) wearing the pin name lands in
+                # dirs, not files — it can never be a valid pin
+                raise OSError(errno.EINVAL, "the pin must be a REGULAR "
+                              "file — a directory here can never be a "
+                              "valid pin", p)
+            if os.path.islink(p):
+                out[rel] = "link:" + os.readlink(p)
+                dirs.remove(d)
+        for fn in files:
+            p = os.path.join(cur, fn)
+            rel = os.path.relpath(p, root).replace(os.sep, "/")
+            st = os.lstat(p)
+            if rel in ALLOW:
+                # only the ROOT pin is local state; nested = payload — the
+                # pin is CLASSIFIED before it is excluded: a symlink/FIFO
+                # pin would be followed or block the resolver later
+                if not stat.S_ISREG(st.st_mode):
+                    raise OSError(errno.EINVAL, "the pin must be a REGULAR "
+                                  "file — a symlink or special file here "
+                                  "would be followed by the resolver", p)
+                continue
+            if stat.S_ISLNK(st.st_mode):
+                out[rel] = "link:" + os.readlink(p)
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                # hashing a FIFO would BLOCK the probe forever; classify,
+                # never open blind
+                raise OSError(errno.EINVAL, "unsupported special file "
+                              "(FIFO/socket/device) in the payload — remove "
+                              "it from the skill", p)
+            out[rel] = sha(p)
+    return out
+def main():
+    try:
+        names = sorted(os.listdir(state_dir))
+    except OSError as e:
+        if e.errno == errno.ENOENT:
+            return "OK"   # never installed via install.sh: nothing to check
+        return ("cannot read the install-state dir %s (%s) — remedy: fix "
+                "its permissions" % (state_dir, e))
+    matches = []
+    for fn in names:
+        if not (fn.startswith("install.") and fn.endswith(".json")):
+            continue
+        try:
+            with open(os.path.join(state_dir, fn), encoding="utf-8") as f:
+                rec = json.load(f)
+        except (OSError, ValueError, UnicodeError) as e:
+            return ("unreadable install record %s (%s) — remedy: delete it "
+                    "and reinstall" % (fn, e))
+        if not shape_ok(rec):
+            # a malformed record could belong to THIS skill — treating it as
+            # unrelated would bypass the entry-time integrity check entirely
+            return ("malformed install record %s — remedy: delete it and "
+                    "reinstall that skill" % fn)
+        # semantic BINDING, identical to install.sh: a shape-valid record
+        # whose dest does not end in its own skill name, or that sits under
+        # a filename belonging to a different (skill, dest), is corrupt
+        key = os.path.normcase(os.path.normpath(rec["dest"])).encode("utf-8")
+        want_fn = ("install.%s.%s.v1.json"
+                   % (rec["skill"], hashlib.sha256(key).hexdigest()[:12]))
+        if (os.path.basename(os.path.normpath(rec["dest"])) != rec["skill"]
+                or fn != want_fn):
+            return ("install record %s does not BIND to its own name/"
+                    "destination — remedy: delete it and reinstall that "
+                    "skill" % fn)
+        # match by the RESOLVED parent of the record + its skill-dir name:
+        # skill_dir is built from the PHYSICAL parent, so a record whose
+        # recorded parent was later aliased away would never match its
+        # lexical dest — and the canonicality verdict below would silently
+        # never run (fail-open). Resolving the recorded parent the same way
+        # keeps the match, so the aliased parent is REPORTED, not skipped.
+        rec_id = os.path.normcase(os.path.join(
+            os.path.realpath(os.path.dirname(rec["dest"])),
+            os.path.basename(os.path.normpath(rec["dest"]))))
+        same = rec_id == skill_dir
+        if not same:
+            # last-resort NO-FOLLOW identity — covers a case-variant final
+            # component on a case-insensitive filesystem, where posix
+            # normcase folds nothing: same lstat inode = the very same
+            # directory ENTRY. lstat, never stat: following links would
+            # conflate every symlink install that shares one source; a
+            # dead recorded path is simply not this dir
+            try:
+                same = os.path.samestat(os.lstat(rec["dest"]),
+                                        os.lstat(sys.argv[1]))
+            except OSError:
+                same = False
+        if same:
+            matches.append(rec)
+    # SECOND pass: verify the collected matches only after EVERY record file
+    # proved readable and well-formed — returning OK on the first match
+    # would skip validating records that sort after it, and a malformed one
+    # could belong to this very skill (fail-closed means the whole dir)
+    for rec in matches:
+        # destination-side canonicality, the mirror of the source rule
+        dparent = os.path.dirname(rec["dest"])
+        if (os.path.normcase(os.path.realpath(dparent))
+                != os.path.normcase(os.path.normpath(dparent))):
+            return ("destination root %s is no longer canonical (aliased "
+                    "through a symlink) — remedy: reinstall into the real "
+                    "location" % dparent)
+        src = os.path.join(rec["source"], "skills", rec["skill"])
+        # canonicality, not just the final component: if realpath differs,
+        # a symlink now aliases the skill dir, skills/, or ANY ancestor of
+        # the recorded checkout — the canonical source has moved
+        if (os.path.normcase(os.path.realpath(src))
+                != os.path.normcase(os.path.normpath(src))
+                or not os.path.isdir(src)):
+            return ("recorded source %s moved or disappeared (or is aliased "
+                    "through a symlink) — remedy: reinstall from the "
+                    "checkout at its new location" % src)
+        if rec.get("mode") == "symlink":
+            # consumer check: still a link, and the bytes read THROUGH it
+            # match the current source (git pull is the update path here)
+            if not os.path.islink(rec["dest"]):
+                return ("%s is no longer a symlink — remedy: re-run bash "
+                        "%s/install.sh %s"
+                        % (rec["dest"], rec["source"], rec["skill"]))
+            if tree(rec["dest"]) != tree(src):
+                return ("content through the link differs from the source — "
+                        "remedy: re-run bash %s/install.sh %s"
+                        % (rec["source"], rec["skill"]))
+            # NO early OK: every matched record must pass — a healthy
+            # sibling record must never mask a failing one
+            continue
+        # a copy record needs a REAL directory: isdir/os.walk follow a
+        # root symlink, so a link to a byte-identical tree would pass while
+        # silently disabling the staleness/corruption checks
+        if os.path.islink(rec["dest"]) or not os.path.isdir(rec["dest"]):
+            return ("installed copy at %s is missing or was replaced by a "
+                    "symlink — remedy: remove it and reinstall (bash "
+                    "%s/install.sh %s)"
+                    % (rec["dest"], rec["source"], rec["skill"]))
+        if tree(rec["dest"]) != rec.get("files"):
+            return ("installed copy differs from its record (corrupted or "
+                    "edited) — remedy: bash %s/install.sh --refresh %s"
+                    % (rec["source"], rec["skill"]))
+        if tree(src) != rec.get("files"):
+            return ("source checkout changed since the install (STALE "
+                    "copy) — remedy: bash %s/install.sh --refresh %s"
+                    % (rec["source"], rec["skill"]))
+    return "OK"   # every record well-formed; every match (if any) verified
+try:
+    sys.stdout.write(main())
+except Exception as e:
+    sys.stdout.write("record check crashed (%s: %s) — remedy: fix the "
+                     "install-state dir or reinstall the skill"
+                     % (type(e).__name__, e))
+' "$SKILL_ROOT" 2>/dev/null) || rec_out=""
+  if [ "$rec_out" != "OK" ]; then
+    if [ -n "$rec_out" ]; then
+      say "PROBE FAIL install: $rec_out"
+    else
+      say "PROBE FAIL install: the record check produced no verdict (python crashed or was killed) — remedy: re-run; if it persists, reinstall the skill"
+    fi
+    fail=1
+  fi
+fi
+
 exit "$fail"
