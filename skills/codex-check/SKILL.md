@@ -72,3 +72,4 @@ State: the model used, findings fixed, findings rebutted (and why), findings lef
 ## Troubleshooting
 
 Same as `codex-debate`: login status prints to stderr; `codex logout && codex login` on SSO 401; `npm install -g @openai/codex@latest` if the model requires a newer CLI.
+Reviewer looks stale / wrong family? `bash "<skill dir>/scripts/preflight-model.sh"` — silent means fresh; a printed line names what is stale and its remedy (report-only: it never updates codex).

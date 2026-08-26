@@ -194,4 +194,5 @@ Default effort is `xhigh`. For a final gate on a risky change, one round at `-c 
 - 401 `require_sso_login` → the gate has hard-stopped; USER remedy: `codex logout && codex login`, then restart the gate manually.
 - "model requires a newer version of Codex" → `npm install -g @openai/codex@latest`.
 - Available models + validation evidence: `bash "<skill dir>/scripts/resolve-model.sh" --propose debate`.
+- Reviewer looks stale / wrong family? `bash "<skill dir>/scripts/preflight-model.sh"` — silent means fresh; a printed line names what is stale and its remedy (report-only: it never updates codex).
 - Reviews too slow / quota too tight → `bash "<skill dir>/scripts/resolve-model.sh" --propose debate` prints the candidates and the pinning protocol.

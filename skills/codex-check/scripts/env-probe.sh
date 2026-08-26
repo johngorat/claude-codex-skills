@@ -98,11 +98,16 @@ sys.exit(0 if ok else 1)' "$1/package.json" 2>/dev/null
       # because a naive pass here dies on the first live round instead.
       # (Needs the already-verified python3; if python3 failed, the probe is
       # failing anyway.)
+      node_ok=1
       if ! command -v node >/dev/null 2>&1; then
-        say "PROBE FAIL codex: '$real' is an npm entry but 'node' is not on PATH — remedy: install Node.js (e.g. brew install node) or reinstall codex"
+        node_ok=0
+        say "PROBE FAIL node: not found on PATH, but the codex install at '$pkgdir' is an npm layout that needs it — remedy: install Node.js (e.g. brew install node) or reinstall codex"
         fail=1
       fi
-      if [ "$py_ok" -eq 1 ]; then
+      # one line per problem: an ABSENT node is fully reported above — the
+      # target query and payload selection run only when node exists, so no
+      # second, contradictory "is on PATH" diagnostic can appear.
+      if [ "$py_ok" -eq 1 ] && [ "$node_ok" -eq 1 ]; then
         # Same selection law as resolve-model.sh: the platform dependency is
         # NAMED by the root package metadata (glob fallback only when it
         # names nothing); the ACTIVE one must carry NODE's own platform-arch

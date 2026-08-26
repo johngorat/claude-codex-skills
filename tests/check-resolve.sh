@@ -274,9 +274,23 @@ elapsed=$((SECONDS - t0))
 if [ "$pe" -ne 0 ]; then ok; else bad "hanging node passed the probe (no timeout)"; fi
 if [ "$elapsed" -le 25 ]; then ok
 else bad "hanging node was not bounded by the 15s timeout (took ${elapsed}s)"; fi
+
+# ---- 16c. node entirely ABSENT: one node diagnostic, no contradictory second --
+# Build a PATH stripped of every dir carrying an executable node — tools stay
+# in their own dirs (no relocation, no MSYS DLL hazard).
+NONODE=""
+oldIFS=$IFS; IFS=:
+for d in $PATH; do
+  if [ -n "$d" ] && [ ! -x "$d/node" ]; then NONODE="$NONODE$d:"; fi
+done
+IFS=$oldIFS
+po=$(PATH="$NPM/bin:${NONODE%:}" bash "$T/skill/scripts/env-probe.sh" 2>&1); pe=$?
+if [ "$pe" -ne 0 ]; then ok; else bad "npm layout with no node passed the probe"; fi
+case $po in *"node: not found on PATH"*) ok ;; *) bad "node absence not named: $po" ;; esac
+case $po in *"is on PATH but produced"*) bad "contradictory second node message still printed" ;; *) ok ;; esac
 else
-  printf 'note: node absent — probe npm tests 16/16b skipped (7 checks)\n'
-  ok; ok; ok; ok; ok; ok; ok
+  printf 'note: node absent — probe npm tests 16/16b/16c skipped (10 checks)\n'
+  ok; ok; ok; ok; ok; ok; ok; ok; ok; ok
 fi
 
 # ---- 17. malformed bytes: refusal with remedy, never a traceback --------------
