@@ -37,13 +37,19 @@ tokens draw from the plan's rolling 5-hour quota window, not a per-token bill.
 - **This runbook (canonical):** clone + `install.sh` — transactional installs,
   staleness records, `--verify`/`--refresh`, bare skill names (`/codex-check`).
   Steps 1–10 below.
-- **Plugin channel (additional):** one-command install with automatic updates,
-  no clone needed. Skills arrive NAMESPACED (`/codex-skills:codex-check`):
+- **Plugin channel (additional):** marketplace install, no clone needed.
+  Skills arrive NAMESPACED (`/codex-skills:codex-check`):
 
   ```
   /plugin marketplace add johngorat/claude-codex-skills
   /plugin install codex-skills@codex-skills
   ```
+
+  Updates are NOT automatic by default: either enable auto-update for this
+  marketplace in the `/plugin` menu (opt-in), or update manually —
+  `/plugin marketplace update codex-skills` then
+  `claude plugin update codex-skills` (a restart applies it). Updates track
+  the repo's commits (no version field to bump).
 
   Steps 3–6 (codex CLI, auth, probe, model choice) apply unchanged — run the
   probe/resolver scripts from the installed plugin's skill directories. One

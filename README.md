@@ -85,15 +85,17 @@ folder into `~/.claude/skills/` alongside the generic three.
 
 ## Installation
 
-### Option 0 — as a plugin (one command, auto-updates)
+### Option 0 — as a plugin (marketplace install)
 
 ```
 /plugin marketplace add johngorat/claude-codex-skills
 /plugin install codex-skills@codex-skills
 ```
 
-Skills arrive namespaced (`/codex-skills:codex-debate`, …); enable auto-update
-in the `/plugin` menu and new versions pull in on their own. You still need
+Skills arrive namespaced (`/codex-skills:codex-debate`, …). Updates are
+opt-in: enable auto-update for this marketplace in the `/plugin` menu, or
+update manually with `/plugin marketplace update codex-skills` +
+`claude plugin update codex-skills` (restart to apply). You still need
 the Codex CLI + login (Option B step 1) and a model choice ([Model
 selection](#model-selection)). One caveat: the plugin cache is replaced on
 every update, so a model pin for a plugin install goes into

@@ -47,6 +47,12 @@ if not (isinstance(name, str) and KEBAB.match(name)):
     errs.append("plugin.name missing or not kebab-case: %r" % name)
 if not plugin.get("description"):
     errs.append("plugin.description missing (namespace UX depends on it)")
+if not (isinstance(plugin.get("author"), dict) and plugin["author"].get("name")):
+    errs.append("plugin.author.name missing")
+for url_field in ("homepage", "repository"):
+    v = plugin.get(url_field)
+    if not (isinstance(v, str) and v.startswith("https://")):
+        errs.append("plugin.%s missing or not an https URL: %r" % (url_field, v))
 if "version" in plugin:
     errs.append("plugin.version present — updates are commit-SHA-tracked "
                 "by decision (CLAUDEX-ADOPTION Stage 1); a stale manual "
@@ -91,9 +97,14 @@ done
 if command -v claude >/dev/null 2>&1; then
   if claude plugin validate "$ROOT" >/dev/null 2>&1; then ok
   else bad "claude plugin validate rejected the manifests"; fi
+  # The manifest pass above does NOT open skill frontmatter — a malformed
+  # SKILL.md would ship silently. Validate the distributed components too
+  # (strict here: skills carry no deliberate warnings).
+  if claude plugin validate "$ROOT/skills" --strict >/dev/null 2>&1; then ok
+  else bad "claude plugin validate --strict rejected the skills directory"; fi
 else
-  printf 'SKIP (counted ok): claude CLI absent — validation ran only structurally\n'
-  ok
+  printf 'SKIP (counted ok x2): claude CLI absent — validation ran only structurally\n'
+  ok; ok
 fi
 
 printf 'check-plugin: %d passed, %d failed\n' "$pass" "$fail"
