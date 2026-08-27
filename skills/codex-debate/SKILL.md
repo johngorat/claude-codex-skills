@@ -65,9 +65,14 @@ Build the round input (review prompt first, then the diff), then launch via the 
 
 ```bash
 git add -N .   # intent-to-add: new files show up in the diff
-{ printf '%s\n\n' "<review prompt>"; git diff --unified=5 "$BASE"; } > "$RUN_DIR/round.input"
+git diff --unified=5 "$BASE" > "$RUN_DIR/diff"
+[ -s "$RUN_DIR/diff" ] || { echo "nothing to review — the diff is empty"; }   # STOP here
+{ printf '%s\n\n' "<review prompt>"; cat "$RUN_DIR/diff"; } > "$RUN_DIR/round.input"
 bash "<skill dir>/scripts/review-round.sh" "$RUN_DIR" "$MODEL" xhigh "$SCHEMA"
 ```
+
+(The diff is checked for emptiness BEFORE the prompt is prepended — with the
+prompt in front, the launcher's own empty-input fail-fast can never fire.)
 
 The script fails fast on an empty `round.input` (an empty diff means there is nothing to review — stop, don't burn a quota pass). It returns immediately; poll with short foreground calls every 1–2 minutes:
 
