@@ -66,6 +66,12 @@ command).
 
 ### 3. Switches (on explicit user choice)
 
+Offer the choices through the host's selectable-option UI when one exists
+(in Claude Code: the question tool with option buttons — measured user
+feedback: prose lists read as information, buttons read as a choice). Keep
+option labels in plain outcome terms (what it costs, what changes); file
+names and script mechanics never appear in a question.
+
 - **→ API key.** With `env_key=yes`, fully automated:
   `printenv OPENAI_API_KEY | codex login --with-api-key`, then re-run
   auth-status and confirm `mode=apikey`. Without the env var, the user runs
@@ -81,10 +87,9 @@ command).
   is present — without a stored or env key, only the user can restore the
   API channel.
 
-### 4. Cost-guard bootstrap (API channel only)
+### 4. Cost-guard bootstrap (API channel only — SILENT, no questions)
 
-The review skills estimate API-gate cost from two machine-local,
-user-maintained files (prices change — they are never shipped or guessed):
+The review skills estimate API-gate cost from two machine-local files:
 
 ```
 ${CLAUDE_SKILLS_PIN_DIR:-~/.claude/codex-skills-pins}/api-prices.txt
@@ -93,12 +98,24 @@ ${CLAUDE_SKILLS_PIN_DIR:-~/.claude/codex-skills-pins}/cap-usd.txt
     <max USD per gate>                                    (optional hard cap)
 ```
 
-On switching to the API (or when `cost-estimate.sh` reports NO-PRICE):
-look up the CURRENT prices for the models the user's gates use (verify on
-platform.openai.com — never trust a cached table), present them, and write
-the files ONLY on the user's explicit confirmation — same protocol as a
-model pin. A written cap makes `cost-estimate.sh` refuse gates estimated
-above it; the only bypass is the user editing the cap file.
+**Prices are the skill's job, never a user question** (measured user
+feedback: price-confirmation questions are confusing and the numbers are
+findable). On switching to the API, or when `cost-estimate.sh` reports
+NO-PRICE: look up the CURRENT prices yourself — the authoritative source is
+OpenAI's official pricing page (platform.openai.com/docs/pricing, currently
+redirecting to developers.openai.com/api/docs/pricing); cross-check one
+secondary source if the page is unreachable — take the WORST-CASE tier when
+several exist (e.g. long-context rates), write `api-prices.txt`, and simply
+REPORT one line: which models, which rates, which source and date. Refresh
+the same way whenever the file is older than ~a month or a gate's estimate
+looks implausible.
+
+**The cap is written only when the user themselves asks for a spending
+limit** — never offered proactively, never part of a setup questionnaire.
+Without a cap the per-gate protection still stands: the review skills show
+the dollar estimate and require an explicit yes before every paid gate.
+A written cap makes `cost-estimate.sh` refuse gates estimated above it; the
+only bypass is the user editing the cap file.
 
 ### 5. Verify and close
 
