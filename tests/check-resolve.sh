@@ -529,6 +529,17 @@ rr_refuses "id-less launch with recorded thread" "SECOND thread"
 : > "$rd/thread"
 rr_refuses "empty thread record" "never overwritten" "11111111-2222-3333-4444-555555555555"
 [ ! -s "$rd/thread" ] && ok || bad "empty thread record was overwritten"
+# a DANGLING SYMLINK record: -e alone is false for it, but it must still
+# count as a present (corrupt) record — both the id-less and the id path
+rm -f "$rd/thread"
+if ln -s "$rd/no-such-target" "$rd/thread" 2>/dev/null && [ -L "$rd/thread" ]; then
+  rr_refuses "dangling thread record (id-less)" "SECOND thread"
+  rr_refuses "dangling thread record (with id)" "not a regular file" \
+    "11111111-2222-3333-4444-555555555555"
+else
+  echo "SKIP (counted ok x6): symlinks unavailable — dangling-thread cases skipped LOUDLY"
+  ok; ok; ok; ok; ok; ok
+fi
 rm -rf "$rd"
 
 # ---- 26. dangling pin symlink is a BROKEN pin, never an absent one ------------

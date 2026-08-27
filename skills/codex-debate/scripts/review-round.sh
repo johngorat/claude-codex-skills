@@ -61,7 +61,9 @@ fi
 
 # Resume-target law (header): validate the id's shape, then pin one thread
 # per run dir. Every failure exits BEFORE any codex process exists.
-if [ -z "$THREAD_ID" ] && [ -e "$RUN_DIR/thread" ]; then
+# -e follows symlinks — a DANGLING symlink at the record path must still
+# count as present (a corrupt record, not an absent one), hence the -L arm.
+if [ -z "$THREAD_ID" ] && { [ -e "$RUN_DIR/thread" ] || [ -L "$RUN_DIR/thread" ]; }; then
   echo "ERROR: $RUN_DIR/thread already records this run's thread but no thread id was passed — a fresh launch here would open a SECOND thread in the same run dir. Pass the recorded id (cat $RUN_DIR/thread) or start a fresh run dir" >&2
   exit 2
 fi
@@ -74,7 +76,13 @@ if [ -n "$THREAD_ID" ]; then
     echo "ERROR: the passed thread id is not exactly one UUID — refusing to resume: codex has been observed silently resuming the MOST RECENT session on a malformed id, and a wrong-target resume looks successful. Take the id from round 1's thread.started event" >&2
     exit 2
   fi
-  if [ -e "$RUN_DIR/thread" ]; then
+  if [ -e "$RUN_DIR/thread" ] || [ -L "$RUN_DIR/thread" ]; then
+    # the record must be a plain regular file — a symlink (dangling or not)
+    # or any special file is a corrupt record, refused before it is read
+    if [ ! -f "$RUN_DIR/thread" ] || [ -L "$RUN_DIR/thread" ]; then
+      echo "ERROR: $RUN_DIR/thread is not a regular file — the thread record is corrupt and is never overwritten. Start a fresh run dir" >&2
+      exit 2
+    fi
     RECORDED_THREAD=$(cat "$RUN_DIR/thread" 2>/dev/null || true)
     if [ -z "$RECORDED_THREAD" ]; then
       # -e not -s above: an EMPTY record is corrupt (interrupted write), and a
