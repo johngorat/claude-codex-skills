@@ -115,7 +115,16 @@ fi
 rm -f "$T/pins/cap-usd.txt"
 # non-regular config files fail closed INSTANTLY — a FIFO would hang a plain
 # open() until a writer appears, and a cap check must never hang a gate
-if mkfifo "$T/pins/cap-usd.txt" 2>/dev/null && [ -p "$T/pins/cap-usd.txt" ]; then
+fifo_visible() { # the reader is python — the fixture only counts if PYTHON
+                 # sees a FIFO (MSYS emulates fifos invisibly to native python)
+  PYTHONIOENCODING=utf-8 python3 -c 'import os,stat,sys
+try:
+    sys.exit(0 if stat.S_ISFIFO(os.lstat(sys.argv[1]).st_mode) else 1)
+except OSError:
+    sys.exit(1)' "$1" 2>/dev/null
+}
+if mkfifo "$T/pins/cap-usd.txt" 2>/dev/null && [ -p "$T/pins/cap-usd.txt" ] \
+    && fifo_visible "$T/pins/cap-usd.txt"; then
   run_ce "$IN" gpt-x-test
   [ "$got" -eq 1 ] && ok || bad "FIFO cap failed open: exit $got"
   rm -f "$T/pins/cap-usd.txt"
