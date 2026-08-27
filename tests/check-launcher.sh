@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Launcher process-contract harness — OBSERVE-ONLY (rev 8, contract-narrowed
-# redesign after two exhausted review budgets; see the project plan record).
+# Launcher process-contract harness — OBSERVE-ONLY (rev 9. Rev 8 was the
+# contract-narrowed redesign after two exhausted review budgets; rev 9 adds
+# the one-authority identity law and channel-aware C7 acceptance for the
+# npm/node resolver shim, both measured on the Mac 2026-08-27; see the
+# project plan record).
 #
 # THE SIGNAL LAW. This harness delivers signals at exactly THREE sites, and
 # each of them IS the contract under test — never housekeeping:
@@ -77,6 +80,18 @@
 #      fd-close EOF chain, then exit is OBSERVED. A child that survives EOF
 #      is REPORTED, never killed. Native pid OWNED via /proc/$!/winpid
 #      ($! on POSIX), STRICT: no mapping -> no native ops -> INCOMPLETE.
+#      Acceptance of the observed pid is CHANNEL-AWARE: standalone channel =
+#      the image basename is EXACTLY codex/codex.exe; interpreter channel
+#      requires ALL of — the resolver's bytes are a '#!' script shim (READ,
+#      never executed), the observed basename is exactly node/node.exe, and
+#      a slash-bearing argv word of the observed pid realpath-equals the
+#      realpath of the resolver (argv is read at the native layer; a failed
+#      read is QUERYFAIL and REFUSES — a Windows npm shim is a STATED
+#      limitation, since argv there would need PEB access: refuse,
+#      INCOMPLETE). Anything else refuses with no native operation. Every
+#      identity/mapping refusal is NON-DOWNGRADABLE incomplete (inc-other);
+#      the channel decision (accepted / refused+why / skipped+why) is
+#      attested verbatim in the report.
 #      REQUIRED: a skip yields exit 2 (CHECK_LAUNCHER_ALLOW_NO_CODEX=1
 #      downgrades only the exit code, only for codex-availability skips)
 #
@@ -84,7 +99,12 @@
 # carries image+START IDENTITY captured at track time, and liveness is
 # classified ALIVE/DEAD/QUERYFAIL at the native layer (an identity mismatch
 # on a live pid means the ORIGINAL is dead and the pid was reused; a failed
-# identity query is QUERYFAIL, never death). A blank or LOW-RESOLUTION start
+# identity query is QUERYFAIL, never death). ONE AUTHORITY PER GATING FACT:
+# every comparison that gates a signal or a clause compares two ident_of
+# OBSERVATIONS; a self-reported identity (the beacon's sys.executable) only
+# corroborates, and its divergence from the kernel view is ATTESTED once
+# (expected on macOS, where the framework python stub EXECS
+# Python.app/Contents/MacOS/Python). A blank or LOW-RESOLUTION start
 # identity (the ps-lstart fallback resolves whole seconds) disqualifies the
 # pid from ever being a signal target — C4 and C5 refuse rather than signal
 # at less-than-reuse precision. Every signal site re-validates the target's
@@ -115,6 +135,7 @@ set -u
 fail=0
 inc_c7=0
 inc_other=0
+SELFREP_NOTED=0   # the self-report/observed image divergence is attested once
 say() { printf '%s\n' "$*"; }
 pass() { say "PASS: $1"; }
 flunk() { say "FAIL: $1"; fail=1; }
@@ -255,6 +276,54 @@ native_of_job() { # $1 = $! value
   esac
 }
 
+# Does the observed pid's argv name the resolver? MATCH / NOMATCH / QUERYFAIL.
+# Observation only (no signals; nothing executed but the verified python):
+# /proc/<pid>/cmdline on linux, sysctl KERN_PROCARGS2 on darwin; on Windows
+# argv would need PEB access — QUERYFAIL by declaration (stated limitation).
+# Only slash-bearing words are compared, so a bare token can never
+# realpath-resolve against the CWD into a false match. QUERYFAIL never
+# matches: the caller must REFUSE, not guess.
+argv_names_resolver() { # $1 = native pid, $2 = resolver path
+  "$PY" - "$1" "$2" <<'PC' 2>/dev/null || printf QUERYFAIL
+import os,sys
+pid=int(sys.argv[1]); want=os.path.realpath(sys.argv[2])
+if os.name=="nt":
+    sys.stdout.write("QUERYFAIL"); sys.exit(0)
+args=None
+try:
+    with open("/proc/%d/cmdline" % pid,"rb") as f:
+        args=[a.decode("utf-8","replace") for a in f.read().split(b"\0") if a]
+except OSError:
+    if sys.platform=="darwin":
+        try:
+            import ctypes,struct
+            libc=ctypes.CDLL("/usr/lib/libSystem.B.dylib",use_errno=True)
+            mib=(ctypes.c_int*3)(1,49,pid)  # CTL_KERN, KERN_PROCARGS2
+            sz=ctypes.c_size_t(0)
+            if libc.sysctl(mib,3,None,ctypes.byref(sz),None,0)==0 and sz.value:
+                raw=ctypes.create_string_buffer(sz.value)
+                if libc.sysctl(mib,3,raw,ctypes.byref(sz),None,0)==0:
+                    buf=raw.raw
+                    argc=struct.unpack_from("@i",buf,0)[0]
+                    i=buf.index(b"\0",4)          # end of the exec_path blob
+                    while i<len(buf) and buf[i:i+1]==b"\0": i+=1
+                    args=[p.decode("utf-8","replace")
+                          for p in buf[i:].split(b"\0")[:argc]]
+        except Exception:
+            args=None
+if not args:
+    sys.stdout.write("QUERYFAIL"); sys.exit(0)
+for a in args:
+    if "/" not in a and "\\" not in a: continue
+    try:
+        if os.path.realpath(a)==want:
+            sys.stdout.write("MATCH"); sys.exit(0)
+    except OSError:
+        pass
+sys.stdout.write("NOMATCH")
+PC
+}
+
 # ---- tracking (observation records; cleanup only ever WAITS on these) --------
 # SHELLS lines: <msys-pid>TAB<native-pid>TAB<image>TAB<start>TAB<note> —
 # wrapper shells carry the same native identity as native records, so their
@@ -267,13 +336,23 @@ track_shell() { # $1 msys pid, $2 bound note — native identity captured NOW
   [ -n "$sn" ] && sid=$(ident_of "$sn")
   printf '%s\t%s\t%s\t%s\n' "$1" "${sn:-}" "${sid:-$TAB}" "$2" >> "$SHELLS"
 }
-track_native() { # $1 pid, $2 image, $3 bound note — start identity NOW
+track_native() { # $1 pid, $2 image hint (corroboration ONLY — never gates), $3 bound note
   id=$(ident_of "$1")
+  obsimg=${id%%"$TAB"*}
   st=${id#*"$TAB"}
   if [ -z "$st" ] && [ "$(native_state "$1")" != DEAD ]; then
     say "note: start identity BLANK for live native pid $1 ($2) — this pid is disqualified as a kill target"
   fi
-  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "${st:-}" "$3" >> "$PIDS"
+  if [ -n "$obsimg" ] && [ -n "$2" ] && [ "$SELFREP_NOTED" -eq 0 ] \
+     && [ "$(printf %s "$obsimg" | tr '[:upper:]' '[:lower:]')" != "$(printf %s "$2" | tr '[:upper:]' '[:lower:]')" ]; then
+    SELFREP_NOTED=1
+    say "ATTEST: kernel-observed image differs from the self-reported one ('$obsimg' vs '$2') — exec indirection on this platform; the OBSERVED image is what gets recorded and gates"
+  fi
+  # the recorded image is the OBSERVATION or nothing — the hint must never
+  # leak into a field that later gates a signal (one-authority law); a blank
+  # observed image makes C4 refuse INCOMPLETE rather than compare across
+  # authorities
+  printf '%s\t%s\t%s\t%s\n' "$1" "${obsimg:-}" "${st:-}" "$3" >> "$PIDS"
 }
 # Identity-aware liveness. Only a COMPLETE, DIFFERING start identity proves
 # reuse; a partial or failed identity query on a live pid is QUERYFAIL,
@@ -435,6 +514,9 @@ payload_img() { cut -f2 "$T/beacon" 2>/dev/null; }
 beacon_start() { # start identity of the tracked beacon pid (from PIDS)
   grep "^$(beacon_pid)$TAB" "$PIDS" 2>/dev/null | tail -1 | cut -f3
 }
+beacon_img() { # kernel-observed track-time image of the beacon pid (from PIDS)
+  grep "^$(beacon_pid)$TAB" "$PIDS" 2>/dev/null | tail -1 | cut -f2
+}
 track_beacon() { # $1 bound note
   have_beacon || return 1
   track_native "$(beacon_pid)" "$(payload_img)" "$1"
@@ -473,9 +555,18 @@ H_LAUNCH=$(hash16 "$LAUNCHER");      [ "$H_LAUNCH" = UNHASHABLE ] && flunk "atte
 # clause.
 CODEX_BIN=$(command -v codex || true)
 H_CODEXBIN=none
+CODEX_IS_SHIM=0
+CODEX_KIND="native binary (standalone channel expected)"
 if [ -n "$CODEX_BIN" ]; then
   H_CODEXBIN=$(hash16 "$CODEX_BIN")
   [ "$H_CODEXBIN" = UNHASHABLE ] && flunk "attestation: codex resolver binary unhashable"
+  # channel detection READS the resolver's first two bytes with the read
+  # BUILTIN — nothing is executed and no external process is spawned
+  c2=""
+  IFS= read -r -n 2 c2 < "$CODEX_BIN" 2>/dev/null || true
+  case "$c2" in
+    '#!') CODEX_IS_SHIM=1; CODEX_KIND="script shim (interpreter channel expected)" ;;
+  esac
 fi
 
 # ---- C1 (watchdog OBSERVES; on timeout it fails and names the survivors) -----
@@ -548,8 +639,13 @@ else
     curid=$(ident_of "$recnat")
     curimg=$(printf %s "${curid%%"$TAB"*}" | tr '[:upper:]' '[:lower:]')
     curst=${curid#*"$TAB"}
-    wantimg=$(payload_img | tr '[:upper:]' '[:lower:]')
-    if [ -z "$curimg" ] || [ "$curimg" != "$wantimg" ] || [ "$curst" != "$bst" ]; then
+    # track-time OBSERVATION — the same authority as curimg; the beacon's
+    # self-report only corroborates (one-authority law)
+    wantimg=$(beacon_img | tr '[:upper:]' '[:lower:]')
+    if [ -z "$wantimg" ]; then
+      inc_other=1
+      say "C4 REFUSE (INCOMPLETE): track-time observed image is blank — kill target unverifiable at the image level; no signal sent"
+    elif [ -z "$curimg" ] || [ "$curimg" != "$wantimg" ] || [ "$curst" != "$bst" ]; then
       flunk "C4 refuse: identity mismatch at validation (image '$curimg' vs '$wantimg', start '$curst' vs '$bst') — no signal sent"
     else
       pass "C4 precondition: recorded pid validated as the tracked payload (native $recnat, image+start match), ALIVE"
@@ -726,6 +822,8 @@ esac
 # ---- C7 (production boundary; teardown = fd-close EOF, observed — no kill) ----
 c7_attested=0
 C7IMG=""
+C7CHAN=""
+C7DECISION=""   # precomputed channel decision, printed verbatim in the attestation
 H_CODEX=none
 if [ -n "$CODEX_BIN" ]; then
   mkdir -p "$T/nohome"   # CODEX_HOME must EXIST (empty = isolated, no auth)
@@ -743,31 +841,59 @@ if [ -n "$CODEX_BIN" ]; then
     if C7NAT=$(native_of_job "$C7JOB") && [ -n "$C7NAT" ]; then
       C7ID=$(ident_of "$C7NAT"); C7IMG=${C7ID%%"$TAB"*}; C7ST=${C7ID#*"$TAB"}
       c7base=${C7IMG##*\\}; c7base=${c7base##*/}   # basename across both separators
+      # CHANNEL-AWARE acceptance, EXACT basenames only (a path merely
+      # CONTAINING "codex" is not the binary). One authority: the OBSERVED
+      # image; the interpreter channel additionally binds the pid to the
+      # resolver through natively-read argv — QUERYFAIL refuses, never guesses.
+      C7CHAN=""
       case $(printf %s "$c7base" | tr '[:upper:]' '[:lower:]') in
-        codex|codex.exe)   # EXACT basename — a path merely CONTAINING "codex" is not the binary
-          printf '%s\t%s\t%s\t%s\n' "$C7NAT" "$C7IMG" "${C7ST:-}" "C7 codex child (bounded by held-fd EOF)" >> "$PIDS"
-          H_CODEX=$(hash16 "$C7IMG")   # hash the OBSERVED image, at observation time
-          c7_alive() { [ "$(native_state "$C7NAT")" = ALIVE ]; }
-          if wait_for c7_alive && sleep 1 && c7_alive; then
-            pass "C7 real native codex resident at NATIVE pid $C7NAT via nohup (image: $C7IMG)"
-            exec 8>&-   # teardown = the EOF chain; nothing is signalled
-            c7_gone() { [ "$(native_state "$C7NAT")" = DEAD ]; }
-            if wait_for c7_gone; then
-              pass "C7 native codex exited on stdin EOF (fd-close teardown observed at the native layer)"
-              c7_attested=1
-            else
-              flunk "C7 native codex survived the EOF teardown (state=$(native_state "$C7NAT")) — REPORTED, not killed: pid=$C7NAT image=$C7IMG start=${C7ST:-?}"
-            fi
+        codex|codex.exe) C7CHAN="standalone binary" ;;
+        node|node.exe)
+          if [ "$CODEX_IS_SHIM" -ne 1 ]; then
+            C7DECISION="refused: interpreter image but the resolver is not a script shim"
+            say "note: C7 mapping refused — observed image '$C7IMG' is an interpreter but the resolver '$CODEX_BIN' is not a script shim; no native operation performed"
           else
-            flunk "C7 observed codex image exited or vanished before residency was established ($(head -1 "$T/c7.out" 2>/dev/null)) — a launched-and-identified reviewer that does not stay resident violates the boundary contract"
+            case $(argv_names_resolver "$C7NAT" "$CODEX_BIN") in
+              MATCH) C7CHAN="interpreter (node shim)" ;;
+              NOMATCH)
+                C7DECISION="refused: node argv never names the resolver"
+                say "note: C7 mapping refused — node pid $C7NAT argv never names the resolver '$CODEX_BIN'; no native operation performed" ;;
+              *)
+                C7DECISION="refused: argv unreadable (QUERYFAIL; Windows PEB limitation)"
+                say "note: C7 argv unreadable for pid $C7NAT (QUERYFAIL is not a match; Windows argv needs PEB access — stated limitation) — channel binding unverifiable; no native operation performed" ;;
+            esac
           fi ;;
         *)
-          say "note: C7 mapping refused — native pid $C7NAT image is '$C7IMG' (basename '$c7base'), not the codex binary; no native operation performed"
-          inc_c7=1 ;;
+          C7DECISION="refused: image basename '$c7base' is neither codex nor its interpreter"
+          say "note: C7 mapping refused — native pid $C7NAT image is '$C7IMG' (basename '$c7base'), not the codex binary or its interpreter; no native operation performed" ;;
       esac
+      if [ -n "$C7CHAN" ]; then
+        C7DECISION="accepted: $C7CHAN"
+        printf '%s\t%s\t%s\t%s\n' "$C7NAT" "$C7IMG" "${C7ST:-}" "C7 codex child (bounded by held-fd EOF)" >> "$PIDS"
+        H_CODEX=$(hash16 "$C7IMG")   # hash the OBSERVED image, at observation time
+        c7_alive() { [ "$(native_state "$C7NAT")" = ALIVE ]; }
+        if wait_for c7_alive && sleep 1 && c7_alive; then
+          pass "C7 real native codex resident at NATIVE pid $C7NAT via nohup (channel: $C7CHAN; image: $C7IMG)"
+          exec 8>&-   # teardown = the EOF chain; nothing is signalled
+          c7_gone() { [ "$(native_state "$C7NAT")" = DEAD ]; }
+          if wait_for c7_gone; then
+            pass "C7 native codex exited on stdin EOF (fd-close teardown observed at the native layer)"
+            c7_attested=1
+          else
+            flunk "C7 native codex survived the EOF teardown (state=$(native_state "$C7NAT")) — REPORTED, not killed: pid=$C7NAT image=$C7IMG start=${C7ST:-?}"
+          fi
+        else
+          flunk "C7 observed codex image exited or vanished before residency was established ($(head -1 "$T/c7.out" 2>/dev/null)) — a launched-and-identified reviewer that does not stay resident violates the boundary contract"
+        fi
+      else
+        # identity/mapping refusal — NON-DOWNGRADABLE incomplete: ALLOW_NO_CODEX
+        # covers only codex-availability skips, never an unverifiable identity
+        inc_other=1
+      fi
     else
+      C7DECISION="refused: no native mapping for the bridge job"
       say "note: C7 direct-boundary attestation UNAVAILABLE — winpid mapping never appeared for job $C7JOB; refusing to touch any native pid"
-      inc_c7=1
+      inc_other=1
     fi
     # close the holder on EVERY path (idempotent); the chain unwinds itself
     exec 8>&-
@@ -776,10 +902,12 @@ if [ -n "$CODEX_BIN" ]; then
       || flunk "C7 bridge chain still alive after EOF (job $C7JOB) — REPORTED, not killed; cleanup will wait out its bound"
   else
     rm -f "$T/hold"
+    C7DECISION="skipped: no usable fifo for the stdin bridge on this machine"
     say "note: C7 skipped — no usable fifo for the stdin bridge on this machine"
     inc_c7=1
   fi
 else
+  C7DECISION="skipped: no codex on PATH"
   say "note: C7 — no codex on PATH"
   inc_c7=1
 fi
@@ -857,8 +985,8 @@ say "python: $PY_VER at $PY ($H_PY)"
 say "nohup: $NOHUP ($H_NOHUP)"
 say "harness: $H_SELF   fake-payload: $H_FAKE   fake-shim: $H_SHIM"
 say "launcher: $H_LAUNCH"
-[ -n "$CODEX_BIN" ] && say "codex resolver: $CODEX_BIN ($H_CODEXBIN — executed only as the C7 boundary subject, never for version probing; the hash is the version identity)"
-say "codex observed image (C7): ${C7IMG:-none} ($H_CODEX)"
+[ -n "$CODEX_BIN" ] && say "codex resolver: $CODEX_BIN ($H_CODEXBIN — $CODEX_KIND; executed only as the C7 boundary subject, never for version probing; the hash is the version identity)"
+say "codex observed image (C7): ${C7IMG:-none} ($H_CODEX) — channel decision: ${C7DECISION:-none}"
 say "signal law: 3 signal sites total (C4 operator kill, C5 control HUP, C5 subject HUP); kill -0 probes only; zero cleanup/escalation kills"
 say "----------------------------------------------------------"
 if [ "$fail" -ne 0 ]; then
