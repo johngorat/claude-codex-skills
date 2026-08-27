@@ -32,16 +32,73 @@
 #     thread refuses too (it would open a second thread in the same run).
 #     Round 1 returns before the thread.started event exists, so rounds 2
 #     vs 3+ get cross-run protection via the record; the round-1-to-2 window
-#     is guarded by the LAUNCH MARKER ($RUN_DIR/launched, created no-clobber
-#     right before the initial exec): a second id-less launch refuses, and a
-#     hang-retry of round 1 requires the operator to rm the marker first —
-#     an explicit statement that the previous launch is dead and unwanted.
+#     is guarded by the LAUNCH MARKER ($RUN_DIR/launched, acquired no-clobber
+#     BEFORE any run-dir state is mutated and released on refusal paths that
+#     launched nothing): a second id-less launch refuses, and a hang-retry of
+#     round 1 requires the operator to rm the marker first — an explicit
+#     statement that the previous launch is dead and unwanted. On top of
+#     that, a transient MUTATION LOCK ($RUN_DIR/.mutating) serializes every
+#     launch — concurrent resumes must not race the artifact rotation.
 set -euo pipefail
 
 RUN_DIR=$1; MODEL=$2; EFFORT=$3; SCHEMA=$4; THREAD_ID=${5:-}
 
 [ -s "$RUN_DIR/round.input" ] || { echo "ERROR: $RUN_DIR/round.input missing or empty — nothing to review" >&2; exit 2; }
 [ -s "$SCHEMA" ] || { echo "ERROR: schema not found: $SCHEMA" >&2; exit 2; }
+
+# Run-dir mutation discipline (round-4/5 gate findings): the run dir's
+# mutable state (model record, rotation, thread record) may only be touched
+# by a launch that owns it.
+#   - The MUTATION LOCK ($RUN_DIR/.mutating, atomic mkdir, held from here
+#     until this script exits) serializes EVERY launch — two concurrent
+#     resumes must not race the artifact rotation either.
+#   - The LAUNCH MARKER ($RUN_DIR/launched, persistent) gates id-less
+#     launches and is acquired BEFORE the model record can be written —
+#     otherwise two concurrent first launches could both mutate state (e.g.
+#     record different models) before one wins. It is released again on
+#     every refusal path that did not launch codex: a refused launch leaves
+#     the run dir exactly as it found it.
+# -e follows symlinks — a DANGLING symlink at any record path still counts
+# as present (a corrupt record, not an absent one), hence the -L arms.
+MARKER_OWNED=0
+CODEX_LAUNCHED=0
+LOCK_OWNED=0
+release_ownership() {
+  if [ "$MARKER_OWNED" = 1 ] && [ "$CODEX_LAUNCHED" = 0 ]; then
+    rm -f "$RUN_DIR/launched"
+  fi
+  if [ "$LOCK_OWNED" = 1 ]; then
+    rmdir "$RUN_DIR/.mutating" 2>/dev/null || true
+  fi
+}
+trap release_ownership EXIT
+if ! mkdir "$RUN_DIR/.mutating" 2>/dev/null; then
+  echo "ERROR: another launch is mutating this run dir right now ($RUN_DIR/.mutating exists) — refusing. If a previous launch crashed mid-flight (no live pid, no growing events), rmdir it and relaunch" >&2
+  exit 2
+fi
+LOCK_OWNED=1
+
+if [ -z "$THREAD_ID" ]; then
+  if [ -e "$RUN_DIR/thread" ] || [ -L "$RUN_DIR/thread" ]; then
+    echo "ERROR: $RUN_DIR/thread already records this run's thread but no thread id was passed — a fresh launch here would open a SECOND thread in the same run dir. Pass the recorded id (cat $RUN_DIR/thread) or start a fresh run dir" >&2
+    exit 2
+  fi
+  # The thread record exists only from the FIRST resume on, so it cannot
+  # guard the window between round 1 and that resume — the launch marker
+  # does. An id-less launch that finds it refuses; the ONE sanctioned way
+  # past it is the conscious hang-retry ritual (kill the dead round, rm the
+  # marker, relaunch) — deleting the marker is the operator's explicit
+  # statement that no thread from this run dir is alive or wanted.
+  if [ -e "$RUN_DIR/launched" ] || [ -L "$RUN_DIR/launched" ]; then
+    echo "ERROR: round 1 was already launched from this run dir ($RUN_DIR/launched exists) — a second id-less launch would open ANOTHER thread. Resume with the id from events.jsonl's thread.started; or, if that round is DEAD (you killed a hang), rm $RUN_DIR/launched to consciously re-run round 1; or start a fresh run dir" >&2
+    exit 2
+  fi
+  if ! (set -C; : > "$RUN_DIR/launched") 2>/dev/null; then
+    echo "ERROR: $RUN_DIR/launched appeared concurrently — another launch is using this run dir; refusing" >&2
+    exit 2
+  fi
+  MARKER_OWNED=1
+fi
 
 # One model per run: the FIRST launch records the resolved slug; every later
 # launch — resume OR a re-run of round 1 in the same run dir — must present
@@ -65,23 +122,6 @@ fi
 
 # Resume-target law (header): validate the id's shape, then pin one thread
 # per run dir. Every failure exits BEFORE any codex process exists.
-# -e follows symlinks — a DANGLING symlink at the record path must still
-# count as present (a corrupt record, not an absent one), hence the -L arm.
-if [ -z "$THREAD_ID" ] && { [ -e "$RUN_DIR/thread" ] || [ -L "$RUN_DIR/thread" ]; }; then
-  echo "ERROR: $RUN_DIR/thread already records this run's thread but no thread id was passed — a fresh launch here would open a SECOND thread in the same run dir. Pass the recorded id (cat $RUN_DIR/thread) or start a fresh run dir" >&2
-  exit 2
-fi
-# The thread record exists only from the FIRST resume on, so it cannot guard
-# the window between round 1 and that resume — the launch marker does: it is
-# created no-clobber right before the initial exec. An id-less launch that
-# finds it refuses; the ONE sanctioned way past it is the conscious hang-retry
-# ritual (kill the dead round, rm the marker, relaunch) — deleting the marker
-# is the operator's explicit statement that no thread from this run dir is
-# alive or wanted.
-if [ -z "$THREAD_ID" ] && { [ -e "$RUN_DIR/launched" ] || [ -L "$RUN_DIR/launched" ]; }; then
-  echo "ERROR: round 1 was already launched from this run dir ($RUN_DIR/launched exists) — a second id-less launch would open ANOTHER thread. Resume with the id from events.jsonl's thread.started; or, if that round is DEAD (you killed a hang), rm $RUN_DIR/launched to consciously re-run round 1; or start a fresh run dir" >&2
-  exit 2
-fi
 if [ -n "$THREAD_ID" ]; then
   command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 not found — run env-probe.sh and follow its remedy" >&2; exit 2; }
   # python re.fullmatch over the WHOLE argv value (parsing law: python3, not
@@ -133,11 +173,6 @@ if [ -f "$RUN_DIR/events.jsonl" ]; then
 fi
 
 if [ -z "$THREAD_ID" ]; then
-  # no-clobber: two concurrent id-less launches must not both start a thread
-  if ! (set -C; : > "$RUN_DIR/launched") 2>/dev/null; then
-    echo "ERROR: $RUN_DIR/launched appeared concurrently — another launch is using this run dir; refusing" >&2
-    exit 2
-  fi
   nohup codex exec \
     -m "$MODEL" -c "model_reasoning_effort=$EFFORT" \
     --sandbox read-only --json \
@@ -156,5 +191,6 @@ else
     < "$RUN_DIR/round.input" > "$RUN_DIR/events.jsonl" 2> "$RUN_DIR/stderr.log" &
 fi
 
+CODEX_LAUNCHED=1
 echo $! > "$RUN_DIR/pid"
 echo "launched pid=$(cat "$RUN_DIR/pid"); poll: kill -0 \$(cat $RUN_DIR/pid); events: $RUN_DIR/events.jsonl"

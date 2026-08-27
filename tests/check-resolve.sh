@@ -535,6 +535,18 @@ rm -f "$rd/thread"
 : > "$rd/launched"
 rr_refuses "id-less relaunch after round 1 (marker present)" "already launched"
 rm -f "$rd/launched"
+# marker acquired BEFORE the model record can be touched, and RELEASED again
+# when the launch refuses without launching (here: model mismatch) — a
+# refused launch leaves the run dir exactly as it found it
+printf 'gpt-b\n' > "$rd/model"
+rr_refuses "id-less model mismatch (marker released)" "recorded model"
+[ ! -e "$rd/launched" ] && [ ! -L "$rd/launched" ] && ok || bad "refused id-less launch left the marker behind"
+[ "$(cat "$rd/model")" = "gpt-b" ] && ok || bad "refused launch mutated the model record"
+printf 'gpt-a\n' > "$rd/model"
+# the transient mutation lock serializes EVERY launch (resumes included)
+mkdir "$rd/.mutating"
+rr_refuses "concurrent mutation lock" "mutating this run dir"
+rmdir "$rd/.mutating"
 # a DANGLING SYMLINK record: -e alone is false for it, but it must still
 # count as a present (corrupt) record — both the id-less and the id path
 rm -f "$rd/thread"
