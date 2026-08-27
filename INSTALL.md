@@ -25,9 +25,11 @@ Skills from this repo's `skills/` folder — the Codex reviewer family:
   for routine changes; escalates to a debate when a major finding stands.
 - **`codex-plan`** — turns a substantial multi-stage task into a staged plan
   with a review tier per stage.
+- **`codex-login`** — reports which auth channel codex is on (subscription /
+  API key) and drives switches; seeds the API cost-guard files.
 
-Install all three unless the human says otherwise — check and plan reference
-the debate skill.
+Install all four unless the human says otherwise — check and plan reference
+the debate skill, and the others lean on codex-login for auth.
 
 Codex runs on a ChatGPT subscription (OAuth login), not a paid API key — review
 tokens draw from the plan's rolling 5-hour quota window, not a per-token bill.
@@ -105,7 +107,7 @@ codex --version
   updates via its own updater/package, never via npm.
 - Version ≥ 0.145.0 is required for the `gpt-5.6` model family.
 
-## Step 4 — Auth (interactive — hand to the human)
+## Step 4 — Auth: pick a CHANNEL, then log in (interactive — hand to the human)
 
 ```bash
 codex login status 2>&1
@@ -114,9 +116,17 @@ codex login status 2>&1
 **Gotcha:** the status line prints to **stderr**, not stdout — always merge
 streams and match "Logged in" on the combined output; exit code is 0 either way.
 
-If not logged in, ask the human to run `codex login` themselves (in Claude Code
-they can type `! codex login`) — it opens a browser OAuth flow into their
-ChatGPT workspace. Known failure modes:
+Codex holds exactly ONE auth mode at a time — the human picks the channel:
+
+| Channel | Login | Billing |
+|---|---|---|
+| **ChatGPT subscription** (default) | `codex login` (browser OAuth; in Claude Code: `! codex login`) | reviews draw from the plan's rolling 5-hour quota window — no per-token bill |
+| **API key** | `printenv OPENAI_API_KEY \| codex login --with-api-key` (or paste the key into that command directly — never into a chat) | pay-per-token; the review skills show a cost estimate and honor a machine-local cap before spending (seeded via `/codex-login` after Step 7) |
+
+An `OPENAI_API_KEY` env var alone does NOT authenticate codex (measured:
+a run without login fails 401) — it only feeds the explicit login command.
+After Step 7 the installed `/codex-login` skill reports the active channel
+and drives switches. Known subscription-login failure modes:
 
 | Symptom | Fix |
 |---|---|

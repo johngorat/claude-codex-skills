@@ -158,6 +158,35 @@ if [ -n "$THREAD_ID" ]; then
   fi
 fi
 
+# One auth CHANNEL per run — same law as the model record: a mid-run channel
+# switch silently changes the reviewer's billing and quota semantics (5h
+# window vs pay-per-token), so it is a hard error, never absorbed. The
+# channel is read via auth-status.sh (bounded local status query), recorded
+# on the first launch (we already own the run dir here: lock + marker), and
+# compared on every later one. mode=none refuses BEFORE codex burns a
+# launch on a 401; mode=unknown proceeds recorded as unknown — an unparsed
+# future status wording must not brick gates, codex itself will refuse an
+# actually-unauthenticated call.
+AUTH_LINE=$(bash "$(dirname "$0")/auth-status.sh" 2>/dev/null </dev/null || true)
+CHANNEL=${AUTH_LINE#*mode=}; CHANNEL=${CHANNEL%% *}
+[ -n "$CHANNEL" ] || CHANNEL=unknown
+if [ "$CHANNEL" = "none" ]; then
+  echo "ERROR: codex is not logged in on any channel — run /codex-login (or 'codex login' / 'codex login --with-api-key') and relaunch" >&2
+  exit 2
+fi
+if [ -s "$RUN_DIR/auth" ]; then
+  RECORDED_AUTH=$(cat "$RUN_DIR/auth" 2>/dev/null || true)
+  if [ "$RECORDED_AUTH" != "$CHANNEL" ]; then
+    echo "ERROR: auth channel is now '$CHANNEL' but this run started on '$RECORDED_AUTH' — one channel per run (billing/quota identity). Finish the run on '$RECORDED_AUTH' or start a fresh run dir" >&2
+    exit 2
+  fi
+elif [ -e "$RUN_DIR/auth" ] || [ -L "$RUN_DIR/auth" ]; then
+  echo "ERROR: $RUN_DIR/auth exists but is empty or not a regular file — the channel record is corrupt and is never overwritten. Start a fresh run dir" >&2
+  exit 2
+else
+  printf '%s\n' "$CHANNEL" > "$RUN_DIR/auth"
+fi
+
 # Rotate previous round's artifacts instead of truncating them: token usage in
 # the events logs feeds the end-of-run scorecard, so every round must survive.
 N=$(find "$RUN_DIR" -maxdepth 1 -name 'events.r*.jsonl' | wc -l | tr -d ' ')   # find, not ls: zero matches must not trip pipefail

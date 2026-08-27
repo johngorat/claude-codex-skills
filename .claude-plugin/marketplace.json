@@ -9,7 +9,7 @@
     {
       "name": "codex-skills",
       "source": "./",
-      "description": "Codex-gated engineering skills: codex-check, codex-debate, codex-plan."
+      "description": "Codex-gated engineering skills: codex-check, codex-debate, codex-plan, codex-login."
     }
   ]
 }

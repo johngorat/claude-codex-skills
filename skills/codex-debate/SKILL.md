@@ -24,7 +24,7 @@ On refusal (exit 1), follow the script's printed bootstrap verbatim — it is th
 - Max **5 review rounds**, plus at most ONE confirmation-only overflow round when a delta APPROVED lands exactly on round 5 (see step 6) — the overflow may only confirm or fail the gate, never debate. A debated-and-unchanged diff is never re-submitted **in response to a REVISE** — if nothing changed since the last round, stop and report the divergence instead of looping. (The confirmation round's full-diff resubmission after a delta APPROVED is the explicit, sanctioned exception.)
 - Review rounds run **detached** (`nohup … &` + polling — see step 3). Never run a round in a foreground Bash call and never rely on the harness's background-task tracking: a review of a non-trivial diff legitimately outlives the foreground ceiling, and tracked background tasks have been observed killed within a minute. Foreground with `timeout: 300000` is only for quick probes and smoke tests.
 - Distinguish **overrun** from **hang**: while the events log grows, the round is working — wait, never retry (a retry burns a full quota pass to hit the same wall). No event growth for 10 minutes = hang → kill, retry once. A round-1 retry additionally requires `rm "$RUN_DIR/launched"` first — the script's launch marker refuses a second id-less launch otherwise (it cannot tell a conscious retry from an accident; deleting the marker is that statement).
-- On a rate-limit/quota error (rolling 5-hour window), an **authentication error (401)**, or a **model-access error**, stop the loop — hard non-approval. Surface whatever `remaining`/`resetsAt` info the error JSONL carries and the remedy for the USER (wait out the window / re-login / request tier access). Retry NOTHING automatically, never relaunch after credential remediation without the user asking, and never step down to another model silently.
+- On a rate-limit/quota error (rolling 5-hour window), an **authentication error (401)**, or a **model-access error**, stop the loop — hard non-approval. Surface whatever `remaining`/`resetsAt` info the error JSONL carries and the remedy for the USER (wait out the window / re-login / request tier access). Retry NOTHING automatically, never relaunch after credential remediation without the user asking, and never step down to another model silently. One sanctioned OFFER accompanies a subscription quota stop: print the channel-switch instruction (`/codex-login` → API key) together with `bash "<skill dir>/scripts/cost-estimate.sh" "$RUN_DIR/round.input" "$MODEL" <remaining rounds>` — the USER performs the switch and restarts the gate themselves; the interrupted run dir stays on its recorded channel (one channel per run) and a fresh run dir starts the paid gate.
 - All scratch files live in the per-run `$RUN_DIR` created in step 1. **Never use fixed shared paths** (e.g. `/tmp/codex-debate-*.json`) — concurrent debates in different sessions on the same machine would clobber each other's verdicts.
 
 ## Workflow
@@ -58,6 +58,8 @@ attestation is fixed BEFORE the review — a known finding class must never cost
 a reviewer round. This skill does not define any checklist itself.
 
 Resolve `$MODEL` (see Model Selection) and the schema path: `SCHEMA=<skill dir>/review-schema.json`.
+
+**Channel & cost guard (before round 1).** `bash "<skill dir>/scripts/auth-status.sh"` — one line, `mode=chatgpt|apikey|none|unknown`. `none` → stop; remedy: `/codex-login`. `apikey` → this gate bills per token: after building `round.input`, run `bash "<skill dir>/scripts/cost-estimate.sh" "$RUN_DIR/round.input" "$MODEL" 5` (worst-case whole gate), present its line, and proceed only on the user's explicit yes; exit 1 = the machine-local cap is exceeded — hard stop, the only bypass is the USER editing the cap file (`/codex-login` seeds prices/cap). The channel is recorded per run by review-round.sh and belongs in the final report.
 
 Build the round input (review prompt first, then the diff), then launch via the bundled script — it owns the codex CLI contract and the detached launch; do not hand-write the codex command:
 
@@ -102,6 +104,21 @@ For **each** finding, judge it yourself before touching code:
 - Unsure → verify by reading the code or running the check; never accept severity at face value.
 
 Project conventions (CLAUDE.md, docs/) outrank reviewer taste — convention conflicts become rebuttals, or go to the user if genuinely contested. Re-run the local checks from step 2 after fixes.
+
+### 4b. Scoreboard & drift watchdog (after EVERY round, before the next launch)
+
+Run `bash "<skill dir>/scripts/round-report.sh" "$RUN_DIR"` and post the standard scoreboard, combining its machine line with your triage:
+
+> **Round N** [model, channel]: found `b/M/m/n` (recurring `k/total`) · fixed `b/M/m/n` · rebutted `x` · tokens `in/out` (cumulative) · `trend=… drift=…`
+
+Then act on the signals — this is the loop's own convergence law, not decoration:
+
+- **`drift=yes`** (≥half of the round's findings re-flag already-debated sites): STOP before the next round. Patching again is the known dead end — present the cures and let the user pick: narrow the contract (delete the failing capability class), raise the findings to lemma-level rules, pin reality with executable fixtures, re-gate the burned surface in a FRESH thread, or re-scope the task.
+- **`trend=flat` with `drift=no`** (majors not decreasing, but the sites are new): spend AT MOST one more round, and say explicitly that you are spending it; still flat after that → stop as above.
+- **Requirements-level findings** (capacity caps, policy trade-offs, "no compliant option exists") — regardless of trend: stop immediately; those are USER decisions and further rounds only re-review prose.
+- **`converging` / `approved`**: continue normally.
+
+A watchdog stop is a legitimate outcome, not a failure — report it like a deadlock (each unresolved point, your position, the applicable cures) and never chase APPROVED past the signals.
 
 ### 5. Rounds 2..5 — resume the same thread
 
@@ -171,7 +188,7 @@ the review by file groups within the same thread via the thread-id argument.
   5-round budget; if a delta APPROVED lands exactly on round 5, ONE confirmation
   round is permitted as the single sanctioned overflow (6 total) — it may only
   confirm or fail the gate, never open new debate.
-- Full-diff `APPROVED` + local checks green → **success**. Report rounds used, findings fixed, findings rebutted, and the reviewer model.
+- Full-diff `APPROVED` + local checks green → **success**. Report rounds used, findings fixed, findings rebutted, the reviewer model, the auth channel, and round-report's token totals (its final table is the gate scorecard).
 - 5 rounds without `APPROVED` → stop. Present the unresolved findings and your position on each; the user decides.
 - Codex repeats findings on an unchanged diff → stop, report the divergence (see Hard Rules).
 

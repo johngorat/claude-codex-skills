@@ -68,7 +68,7 @@ For each finding: real and quick to fix → fix now; real but substantial → es
 
 ### 4. Report
 
-State: the model used, findings fixed, findings rebutted (and why), findings left open. If any open `blocker`/`major` remains → explicitly recommend `/codex-debate` for this change.
+Open with the standard scoreboard: run `bash "<skill dir>/scripts/round-report.sh" "$RUN_DIR"` and quote its line (found counts by severity, tokens, model, channel), then add your triage — fixed `b/M/m/n`, rebutted `x`. On the `apikey` channel append the cost line (`bash "<skill dir>/scripts/cost-estimate.sh" "$RUN_DIR/round.input" "$MODEL" 1` — informational after a single advisory round; `auth-status.sh` tells the channel). Then: findings left open, and if any open `blocker`/`major` remains → explicitly recommend `/codex-debate` for this change.
 
 ## Troubleshooting
 

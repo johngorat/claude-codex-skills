@@ -1,6 +1,6 @@
 {
   "name": "codex-skills",
-  "description": "Codex-gated engineering skills: /codex-check (one-shot second-tier review), /codex-debate (adversarial review loop until APPROVED), /codex-plan (staged plans with a review tier per stage). Claude builds, Codex reviews read-only.",
+  "description": "Codex-gated engineering skills: /codex-check (one-shot second-tier review), /codex-debate (adversarial review loop until APPROVED, with per-round scoreboard and drift watchdog), /codex-plan (staged plans with a review tier per stage), /codex-login (auth-channel status and switching: ChatGPT subscription vs API key, with a cost guard). Claude builds, Codex reviews read-only.",
   "author": {
     "name": "johngorat",
     "url": "https://github.com/johngorat"

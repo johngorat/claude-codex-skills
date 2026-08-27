@@ -45,6 +45,7 @@ positions.
 | [`codex-debate`](skills/codex-debate/SKILL.md) | Run a task, then debate the resulting diff with Codex — fix real findings, rebut false ones, loop until `APPROVED` + green local checks. Up to 5 rounds, flagship model. |
 | [`codex-check`](skills/codex-check/SKILL.md) | One-shot advisory review of the diff — single round, second-tier model, no loop. Claude triages the findings; an unresolved major escalates to `/codex-debate`. |
 | [`codex-plan`](skills/codex-plan/SKILL.md) | Turn a multi-stage task into a staged plan: review tier per stage, past reviewer findings baked in as hard requirements, tools to reuse named. Approve the plan, then it executes via the two skills above. |
+| [`codex-login`](skills/codex-login/SKILL.md) | Report which auth channel the Codex CLI is on and switch: ChatGPT subscription (rolling 5-hour quota, no per-token bill) vs API key (pay-per-token, no window — the review skills then show a cost estimate and honor a machine-local cap before spending). The two are mutually exclusive; switching is an explicit re-login this skill automates where possible. |
 
 ### Which one to use
 
