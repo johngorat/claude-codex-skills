@@ -505,25 +505,49 @@ rm -rf "$rd"
 
 # ---- 25. review-round resume-target law: bad ids refuse BEFORE any launch -----
 # (codex observed silently resuming the MOST RECENT session on a garbage id —
-# both refusal paths must exit 2 with no codex process ever spawned.)
+# every refusal path must exit 2 with no codex process ever spawned.)
+rr_refuses() { # rr_refuses <desc> <stderr-must-contain> [thread-id-arg...]
+  desc=$1; want_err=$2; shift 2
+  bash "$RR" "$rd" gpt-a medium "$rd/schema.json" "$@" >/dev/null 2>"$T/stderr"; got=$?
+  [ "$got" -eq 2 ] && ok || bad "$desc: exit $got, wanted 2; stderr: $(head -2 "$T/stderr")"
+  case $(cat "$T/stderr") in *"$want_err"*) ok ;; *) bad "$desc wording: $(cat "$T/stderr")" ;; esac
+  [ ! -f "$rd/pid" ] && ok || bad "$desc still launched codex"
+}
 rd=$(mktemp -d)
 printf 'x\n' > "$rd/round.input"
 printf '{}\n' > "$rd/schema.json"
 printf 'gpt-a\n' > "$rd/model"
-if bash "$RR" "$rd" gpt-a medium "$rd/schema.json" "not-a-uuid" >/dev/null 2>"$T/stderr"; then
-  bad "malformed thread id did not refuse"
-else
-  [ $? -eq 2 ] 2>/dev/null; ok
-fi
-case $(cat "$T/stderr") in *not\ a\ UUID*) ok ;; *) bad "malformed-id refusal wording: $(cat "$T/stderr")" ;; esac
-[ ! -f "$rd/pid" ] && ok || bad "malformed thread id still launched codex"
+rr_refuses "malformed thread id" "not exactly one UUID" "not-a-uuid"
+# one valid UUID line inside a multi-line value: a line-wise match would pass it
+rr_refuses "multi-line thread id" "not exactly one UUID" \
+  "11111111-2222-3333-4444-555555555555$(printf '\nx')"
 printf 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n' > "$rd/thread"   # as if a resume already pinned it
-if bash "$RR" "$rd" gpt-a medium "$rd/schema.json" "11111111-2222-3333-4444-555555555555" >/dev/null 2>"$T/stderr"; then
-  bad "cross-run thread id did not refuse"
-else ok; fi
-case $(cat "$T/stderr") in *recorded\ thread*) ok ;; *) bad "cross-run refusal wording: $(cat "$T/stderr")" ;; esac
-[ ! -f "$rd/pid" ] && ok || bad "cross-run thread id still launched codex"
+rr_refuses "cross-run thread id" "recorded thread" "11111111-2222-3333-4444-555555555555"
+# id-LESS relaunch into a run dir that already pinned a thread = second thread
+rr_refuses "id-less launch with recorded thread" "SECOND thread"
+# an EMPTY record is corrupt, refused and never overwritten
+: > "$rd/thread"
+rr_refuses "empty thread record" "never overwritten" "11111111-2222-3333-4444-555555555555"
+[ ! -s "$rd/thread" ] && ok || bad "empty thread record was overwritten"
 rm -rf "$rd"
+
+# ---- 26. dangling pin symlink is a BROKEN pin, never an absent one ------------
+# (open() raises FileNotFoundError for both; only lexists tells them apart.)
+rm -f "$PIN" "$MPIN"
+if ln -s "$T/no-such-target" "$PIN" 2>/dev/null && [ -L "$PIN" ]; then
+  run 1 "dangling model.txt symlink refuses" -- debate
+  case $errout in *pin*) ok ;; *) bad "dangling-pin refusal wording: $errout" ;; esac
+  rm -f "$PIN"
+  ln -s "$T/no-such-target" "$MPIN"
+  run 1 "dangling machine-pin symlink refuses (cache must not mask it)" -- debate
+  rm -f "$MPIN"
+else
+  # MSYS without Developer Mode copies instead of linking — the platform
+  # cannot express a dangling symlink, so the case cannot exist here either.
+  rm -f "$PIN"
+  echo "SKIP (counted ok x3): symlinks unavailable — dangling-pin cases skipped LOUDLY"
+  ok; ok; ok
+fi
 
 printf '%s\n' "check-resolve: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

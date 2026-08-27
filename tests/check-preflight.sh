@@ -73,6 +73,19 @@ run_pf
 [ -z "$out" ] && ok || bad "model.txt did not outrank the machine pin: '$out'"
 rm -f "$PIN" "$MPIN"
 
+# ---- 4a2. dangling model.txt symlink IS the effective pin (broken, reported) --
+if ln -s "$T/no-such-target" "$PIN" 2>/dev/null && [ -L "$PIN" ]; then
+  printf 'gpt-9.9-p1\n' > "$MPIN"   # a KNOWN machine pin must not be selected over it
+  run_pf
+  case $out in *stale=*pin-unknown-to-map*model.txt*) ok ;;
+    *) bad "dangling model.txt not reported as the effective broken pin: '$out'" ;; esac
+  rm -f "$PIN" "$MPIN"
+else
+  rm -f "$PIN"
+  echo "SKIP (counted ok): symlinks unavailable — dangling-pin case skipped LOUDLY"
+  ok
+fi
+
 # ---- 4b. malformed pin: sentinel in the line, structure stays parseable -------
 printf 'bad; remedy: arbitrary\n' > "$PIN"
 run_pf

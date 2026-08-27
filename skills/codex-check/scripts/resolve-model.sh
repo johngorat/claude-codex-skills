@@ -467,6 +467,11 @@ def read_pin(path):
                     return line
         return ""  # present but blank — a broken pin, not an absent one
     except FileNotFoundError:
+        # A DANGLING SYMLINK also raises FileNotFoundError, but the entry
+        # EXISTS — it is a broken explicit pin and must refuse, not silently
+        # fall through to the next rung (lexists sees the link itself).
+        if os.path.lexists(path):
+            return "<unreadable: dangling symlink>"
         return None
     except (OSError, UnicodeError) as e:
         return "<unreadable: %s>" % e

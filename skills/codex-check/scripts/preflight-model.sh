@@ -112,6 +112,11 @@ def read_pin():
                         return line, path
             return None, None  # blank pin is the resolver's refusal
         except FileNotFoundError:
+            # a dangling symlink EXISTS — it is the effective (broken) pin,
+            # exactly as the resolver treats it; only true absence falls
+            # through to the machine pin
+            if os.path.lexists(path):
+                return "<unreadable>", path
             continue
         except (OSError, UnicodeError):
             return "<unreadable>", path

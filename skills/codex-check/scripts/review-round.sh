@@ -23,12 +23,15 @@
 #   - Resume-target law: `codex exec resume` with a missing or garbage id has
 #     been observed (third-party measurement, 2026-07-08, adopted here) to
 #     silently fall back to the MOST RECENT session instead of erroring — and
-#     a wrong-target resume looks exactly like a successful one. So the id is
-#     shape-validated BEFORE any launch, and the run dir pins its thread the
-#     same way it pins its model (one thread per run; the pin is written on
-#     the FIRST resume — round 1 returns before the thread.started event
-#     exists, so rounds 2 vs 3+ get cross-run protection, round 1 vs 2 gets
-#     the shape gate).
+#     a wrong-target resume looks exactly like a successful one. So: the id is
+#     validated as EXACTLY one UUID (python re.fullmatch over the whole value)
+#     BEFORE any launch, and the run dir pins its thread the same way it pins
+#     its model — one thread per run, record created no-clobber on the FIRST
+#     resume, an empty/corrupt record refuses (never overwritten), a mismatch
+#     refuses, and an id-LESS launch into a run dir that already pinned a
+#     thread refuses too (it would open a second thread in the same run).
+#     Round 1 returns before the thread.started event exists, so rounds 2
+#     vs 3+ get cross-run protection and round 1 vs 2 gets the shape gate.
 set -euo pipefail
 
 RUN_DIR=$1; MODEL=$2; EFFORT=$3; SCHEMA=$4; THREAD_ID=${5:-}
@@ -57,21 +60,38 @@ else
 fi
 
 # Resume-target law (header): validate the id's shape, then pin one thread
-# per run dir. Both failures exit BEFORE any codex process exists.
+# per run dir. Every failure exits BEFORE any codex process exists.
+if [ -z "$THREAD_ID" ] && [ -e "$RUN_DIR/thread" ]; then
+  echo "ERROR: $RUN_DIR/thread already records this run's thread but no thread id was passed — a fresh launch here would open a SECOND thread in the same run dir. Pass the recorded id (cat $RUN_DIR/thread) or start a fresh run dir" >&2
+  exit 2
+fi
 if [ -n "$THREAD_ID" ]; then
-  if ! printf '%s\n' "$THREAD_ID" | grep -Eq \
-      '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
-    echo "ERROR: thread id '$THREAD_ID' is not a UUID — refusing to resume: codex has been observed silently resuming the MOST RECENT session on a malformed id, and a wrong-target resume looks successful. Take the id from round 1's thread.started event" >&2
+  command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 not found — run env-probe.sh and follow its remedy" >&2; exit 2; }
+  # python re.fullmatch over the WHOLE argv value (parsing law: python3, not
+  # grep — a line-wise match would pass a multi-line value containing one
+  # valid UUID line, and codex would receive the malformed whole).
+  if ! PYTHONIOENCODING=utf-8 python3 -c 'import re,sys; sys.exit(0 if re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", sys.argv[1]) else 1)' "$THREAD_ID"; then
+    echo "ERROR: the passed thread id is not exactly one UUID — refusing to resume: codex has been observed silently resuming the MOST RECENT session on a malformed id, and a wrong-target resume looks successful. Take the id from round 1's thread.started event" >&2
     exit 2
   fi
-  if [ -s "$RUN_DIR/thread" ]; then
-    RECORDED_THREAD=$(cat "$RUN_DIR/thread")
+  if [ -e "$RUN_DIR/thread" ]; then
+    RECORDED_THREAD=$(cat "$RUN_DIR/thread" 2>/dev/null || true)
+    if [ -z "$RECORDED_THREAD" ]; then
+      # -e not -s above: an EMPTY record is corrupt (interrupted write), and a
+      # corrupt record is refused, never silently replaced — same law as model.
+      echo "ERROR: $RUN_DIR/thread exists but is empty or unreadable — the thread record is corrupt and is never overwritten. Start a fresh run dir" >&2
+      exit 2
+    fi
     if [ "$RECORDED_THREAD" != "$THREAD_ID" ]; then
       echo "ERROR: thread id '$THREAD_ID' differs from this run's recorded thread '$RECORDED_THREAD' — one thread per run dir; a cross-run resume would graft rounds onto a foreign review. Pass '$RECORDED_THREAD' or start a fresh run dir" >&2
       exit 2
     fi
   else
-    printf '%s\n' "$THREAD_ID" > "$RUN_DIR/thread"
+    # no-clobber creation: two concurrent first-resumes must not both win
+    if ! (set -C; printf '%s\n' "$THREAD_ID" > "$RUN_DIR/thread") 2>/dev/null; then
+      echo "ERROR: $RUN_DIR/thread appeared concurrently — another launch is using this run dir; refusing" >&2
+      exit 2
+    fi
   fi
 fi
 
