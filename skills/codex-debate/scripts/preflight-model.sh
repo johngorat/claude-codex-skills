@@ -9,9 +9,11 @@
 #     remedy: <one remedy per class, ';'-joined>
 # Classes:
 #   map-missing             the shipped role map is gone
-#   pin-unknown-to-map      this skill's model.txt names a slug the map no
-#                           longer knows (a retired family — exactly how the
-#                           original drift would return in six months)
+#   pin-unknown-to-map      the EFFECTIVE pin (this skill's model.txt, else
+#                           the machine pin under ~/.claude/codex-skills-pins)
+#                           names a slug the map no longer knows (a retired
+#                           family — exactly how the original drift would
+#                           return in six months)
 #   update-not-active       (standalone channel) a newer release is
 #                           downloaded under packages/standalone/releases/
 #                           but `current` still points at an older one
@@ -43,6 +45,13 @@ skill_dir = sys.argv[1]
 codex_home = os.environ.get("CODEX_HOME") or os.path.join(
     os.path.expanduser("~"), ".codex")
 pin_file = os.path.join(skill_dir, "model.txt")
+# machine pin — same location contract as resolve-model.sh (rung 3): the
+# EFFECTIVE pin this preflight judges is the one the resolver would use,
+# i.e. model.txt when present, else the machine pin.
+machine_pin_file = os.path.join(
+    os.environ.get("CLAUDE_SKILLS_PIN_DIR")
+    or os.path.join(os.path.expanduser("~"), ".claude", "codex-skills-pins"),
+    os.path.basename(os.path.normpath(skill_dir)) + ".txt")
 rolemap_file = os.path.join(codex_home, "skills", ".system", "openai-docs",
                             "references", "latest-model.md")
 releases_dir = os.path.join(codex_home, "packages", "standalone", "releases")
@@ -90,17 +99,23 @@ def map_slugs():
     return slugs
 
 def read_pin():
-    try:
-        with open(pin_file, encoding="utf-8-sig") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    return line
-        return None  # blank pin is the resolver's refusal, not staleness
-    except FileNotFoundError:
-        return None
-    except (OSError, UnicodeError):
-        return "<unreadable>"
+    """(slug-or-sentinel, source-path) of the EFFECTIVE pin, or (None, None).
+    model.txt outranks the machine pin exactly as in resolve-model.sh — a
+    present-but-broken model.txt is the effective (unreadable) pin, never
+    silently replaced by the machine pin."""
+    for path in (pin_file, machine_pin_file):
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        return line, path
+            return None, None  # blank pin is the resolver's refusal
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeError):
+            return "<unreadable>", path
+    return None, None
 
 def standalone_state():
     """(newest, current) release versions, or (None, None) off-channel."""
@@ -126,11 +141,12 @@ if not map_present:
     stale.append("map-missing")
     remedies.append("reinstall/update codex to restore the shipped role map")
 
-pin = read_pin()
+pin, pin_source = read_pin()
 if pin and map_present and (pin == "<unreadable>" or pin not in map_slugs()):
     stale.append("pin-unknown-to-map")
-    remedies.append("the pin may name a retired family: re-pin via "
-                    "'resolve-model.sh --propose <tier>' or delete model.txt")
+    remedies.append("the pin (%s) may name a retired family: re-pin via "
+                    "'resolve-model.sh --propose <tier>' or delete that file"
+                    % pin_source)
 
 newest, cur = standalone_state()
 installed = None

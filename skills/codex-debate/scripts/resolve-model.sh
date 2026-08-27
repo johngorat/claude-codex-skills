@@ -6,27 +6,39 @@
 #   resolve-model.sh --propose <tier>          candidates + evidence report
 #
 # stdout contract (resolution mode): EXACTLY one line "<slug>\t<source>",
-#   source: override | pin | cache | rolemap. Nothing else ever lands on
-#   stdout; diagnostics, warnings and the refusal bootstrap go to stderr.
-#   (--propose mode prints its report on stdout — it IS the output there.)
+#   source: override | pin | machine-pin | cache | rolemap. Nothing else ever
+#   lands on stdout; diagnostics, warnings and the refusal bootstrap go to
+#   stderr. (--propose mode prints its report on stdout — it IS the output
+#   there.)
 # Exit codes: 0 resolved / 1 refusal or precondition failure / 2 usage.
 #
-# Ladder (plans/CODEX-MODEL-RESOLUTION-plan.md):
+# Ladder (plans/CODEX-MODEL-RESOLUTION-plan.md; machine pin added by
+# plans/CLAUDEX-ADOPTION-plan.md Stage 1 — plugin-cache installs are replaced
+# wholesale on update, so an in-tree pin cannot survive there):
 #   1 user override   — validated offline; a broken override REFUSES.
 #   2 model.txt pin   — next to SKILL.md; validated offline; a broken pin
 #                       REFUSES (the pin is the USER's explicit choice — an
 #                       automatic source must never outrank or mask it).
-#   3 models_cache.json — back-compat catalog (per-CHANNEL on 0.145: npm
+#   3 machine pin     — ${CLAUDE_SKILLS_PIN_DIR:-~/.claude/codex-skills-pins}/
+#                       <skill>.txt; same explicit-choice semantics as the
+#                       in-tree pin (broken/unvalidated REFUSES, automatic
+#                       sources never mask it). Consulted only when model.txt
+#                       is ABSENT: when both exist the file next to the
+#                       running SKILL.md is the more specific choice, and a
+#                       BROKEN model.txt still refuses rather than fall
+#                       through — otherwise a stale machine pin would silently
+#                       hijack an install whose own pin the user just broke.
+#   4 models_cache.json — back-compat catalog (per-CHANNEL on 0.145: npm
 #                       writes it, standalone does not); original semantics:
 #                       visible models by ascending priority, debate=1st,
 #                       check=2nd (falling back to 1st). Absence is NOT an
 #                       error; an unparseable file warns and continues.
-#   4 latest-model.md — role map (flagship -> debate, mini-like/balanced ->
+#   5 latest-model.md — role map (flagship -> debate, mini-like/balanced ->
 #                       check); the candidate MUST validate offline against a
 #                       source OTHER than the role map itself (cache, rollout
 #                       corpus, payload strings) — the map self-declares
 #                       drift and never self-certifies.
-#   5 REFUSE          — both lanes, with the guided bootstrap (R12): print
+#   6 REFUSE          — both lanes, with the guided bootstrap (R12): print
 #                       candidates + evidence; the agent presents them to the
 #                       USER; model.txt is written ONLY on explicit USER
 #                       confirmation. Never an arbitrary model (R1/D1).
@@ -85,12 +97,20 @@ if len(argv) < 1 or argv[0] not in ("debate", "check") or len(argv) > 2 \
 tier = argv[0]
 override = argv[1] if len(argv) == 2 else None
 
-# ---- locations (CODEX_HOME / XDG_CACHE_HOME are the test seams) ------------
+# ---- locations (CODEX_HOME / XDG_CACHE_HOME / CLAUDE_SKILLS_PIN_DIR are the
+# ---- test seams) ------------------------------------------------------------
 home = os.path.expanduser("~")
 codex_home = os.environ.get("CODEX_HOME") or os.path.join(home, ".codex")
 cache_root = os.path.join(os.environ.get("XDG_CACHE_HOME")
                           or os.path.join(home, ".cache"), "claude-codex-skills")
 pin_file = os.path.join(skill_dir, "model.txt")
+# machine pin: keyed by the SKILL NAME (basename), not the install path — the
+# same skill must resolve identically from a checkout, an installed copy and
+# a plugin-cache version dir (whose path changes on every update).
+pin_dir = (os.environ.get("CLAUDE_SKILLS_PIN_DIR")
+           or os.path.join(home, ".claude", "codex-skills-pins"))
+machine_pin_file = os.path.join(
+    pin_dir, os.path.basename(os.path.normpath(skill_dir)) + ".txt")
 catalog_file = os.path.join(codex_home, "models_cache.json")
 rolemap_file = os.path.join(codex_home, "skills", ".system", "openai-docs",
                             "references", "latest-model.md")
@@ -433,14 +453,14 @@ def validate(slug, exclude_rolemap=False):
         return "payload"
     return None
 
-# ---- pin ---------------------------------------------------------------------
-def read_pin():
-    """First non-blank line of model.txt, or None if the file is absent.
+# ---- pins --------------------------------------------------------------------
+def read_pin(path):
+    """First non-blank line of a pin file, or None if the file is absent.
     An unreadable or non-UTF-8 pin returns a sentinel that fails the slug
     check — a broken EXPLICIT pin must refuse with its remedy, never crash
     with a traceback and never fall through to automatic sources."""
     try:
-        with open(pin_file, encoding="utf-8-sig") as f:
+        with open(path, encoding="utf-8-sig") as f:
             for line in f:
                 line = line.strip()
                 if line:
@@ -489,7 +509,14 @@ def propose_report(for_tier, dest):
     print("  1. Present the candidates above to the USER, including their", file=dest)
     print("     validation status. UNVALIDATED = no offline evidence on this", file=dest)
     print("     machine yet — the USER must consciously accept that.", file=dest)
-    print("  2. ONLY after the USER explicitly confirms a slug, write the pin:", file=dest)
+    print("  2. ONLY after the USER explicitly confirms a slug, write the pin.", file=dest)
+    print("     Machine pin (survives skill updates; the ONLY option for a", file=dest)
+    print("     plugin install — the plugin cache is replaced wholesale on", file=dest)
+    print("     every update):", file=dest)
+    print("       mkdir -p \"%s\"" % pin_dir, file=dest)
+    print("       printf '%%s\\n' '<slug>' > \"%s\"" % machine_pin_file, file=dest)
+    print("     Or the in-tree pin, next to this install's SKILL.md (outranks", file=dest)
+    print("     the machine pin; checkout/installer installs only):", file=dest)
     print("       printf '%%s\\n' '<slug>' > \"%s\"" % pin_file, file=dest)
     print("  3. Re-run the resolution. Never pick a model without USER", file=dest)
     print("     confirmation, and never retry with a guessed slug.", file=dest)
@@ -555,29 +582,36 @@ if override is not None:
     refuse("the user-named model failed offline validation", OVERRIDE_REMEDY)
 evidence_log.append("override: not given")
 
-# 2. pin
-pin = read_pin()
-if pin is None:
-    evidence_log.append("pin (%s): absent" % pin_file)
-elif not SLUG_RE.match(pin):
-    evidence_log.append("pin (%s): does not contain a plausible slug: %r"
-                        % (pin_file, pin))
-    refuse("the pin is broken",
-           "edit %s to a validated candidate above (via the bootstrap, on "
-           "explicit USER confirmation), or delete it to fall through to the "
-           "automatic sources" % pin_file)
-else:
+# 2. in-tree pin / 3. machine pin — identical explicit-choice semantics.
+# A PRESENT pin either resolves or REFUSES; only an ABSENT one falls through.
+# The machine pin is consulted only when model.txt is absent (header rationale:
+# a broken in-tree pin must never be silently rescued by a stale machine pin).
+def pin_rung(path, source, kind):
+    pin = read_pin(path)
+    if pin is None:
+        evidence_log.append("%s (%s): absent" % (kind, path))
+        return
+    if not SLUG_RE.match(pin):
+        evidence_log.append("%s (%s): does not contain a plausible slug: %r"
+                            % (kind, path, pin))
+        refuse("the %s is broken" % kind,
+               "edit %s to a validated candidate above (via the bootstrap, on "
+               "explicit USER confirmation), or delete it to fall through to "
+               "the automatic sources" % path)
     ev = validate(pin)
     if ev:
-        resolved(pin, "pin")
-    evidence_log.append("pin (%s): '%s' has NO offline evidence — the model "
-                        "may be retired or the slug mistyped" % (pin_file, pin))
+        resolved(pin, source)
+    evidence_log.append("%s (%s): '%s' has NO offline evidence — the model "
+                        "may be retired or the slug mistyped" % (kind, path, pin))
     refuse("the pinned model failed offline validation",
            "edit %s to a validated candidate above (via the bootstrap, on "
            "explicit USER confirmation), or delete it to fall through to the "
-           "automatic sources" % pin_file)
+           "automatic sources" % path)
 
-# 3. models_cache.json (back-compat; absence is normal, measured per-channel)
+pin_rung(pin_file, "pin", "pin")
+pin_rung(machine_pin_file, "machine-pin", "machine pin")
+
+# 4. models_cache.json (back-compat; absence is normal, measured per-channel)
 if catalog:
     idx = 0 if tier == "debate" else min(1, len(catalog) - 1)
     resolved(catalog[idx], "cache")
@@ -592,7 +626,7 @@ if catalog_note not in ("absent", "ok"):
             "delete %s (codex regenerates it on the channels that write it)"
             % (catalog_note, catalog_file))
 
-# 4. latest-model.md role map (candidate must validate OUTSIDE the map)
+# 5. latest-model.md role map (candidate must validate OUTSIDE the map)
 if rolemap:
     cand = rolemap_pick(rolemap, tier)
     if cand:
@@ -608,7 +642,7 @@ if rolemap:
 else:
     evidence_log.append("role map (%s): %s" % (rolemap_file, rolemap_note))
 
-# 5. refuse — the guided bootstrap prints via refuse(); when not even a
+# 6. refuse — the guided bootstrap prints via refuse(); when not even a
 # candidate exists, the remedy is restoring a source, not confirming a ghost.
 if candidates(tier):
     refuse("no source named a model",

@@ -46,11 +46,27 @@ Per gate: reviewer verdict `APPROVED`, project validators green, probes matching
 
 ### 6. Mark user-decision points
 
-Any choice only the owner can make (policy trade-offs, deliberate divergences from the source material, architecture buckets that fit no existing rule) is marked in the plan as a STOP-and-ask point, with the options and your recommendation.
+Any choice only the owner can make (policy trade-offs, deliberate divergences from the source material, architecture buckets that fit no existing rule) is marked in the plan as a STOP-and-ask point. Split them into two tiers:
+
+- **Load-bearing** (wrong answer costs a migration, a rewrite, a security hole, or a broken gate) — each one ships in this format, no exceptions:
+  - **Why it matters:** the dependency or constraint that makes it load-bearing.
+  - **Recommendation:** ONE committed answer — not a menu with a shrug.
+  - **If we guess wrong:** the concrete failure.
+- **Cosmetic** (renameable, refactorable, cheap to change later) — one batch of recommendations with a one-line rationale each; the user vetoes by exception, silence = accepted.
+
+If a decision's "if we guess wrong" line comes out weak while drafting, it is cosmetic — demote it. If it turns out answerable from the code, docs, or a past gate, answer it yourself and record it in the assumptions ledger instead of asking.
 
 ### 7. Present, then execute
 
-Show the plan. After approval, execute stage by stage; after each gate report rounds used, findings fixed/rebutted, and the reviewer model. If reality diverges from the plan (escalations, new ground discovered), say so at the moment it happens, not in the final report.
+Show the plan. The presentation carries, besides the stages:
+
+- **Assumptions Ledger** — everything resolved autonomously while drafting, each entry with its source (code path, doc, past finding, measurement). Presented ONCE as a batch — anything the user does not correct is confirmed. Never drip assumptions as individual questions.
+- **Decision Map** — the two decision tiers from step 6, so the user sees how many answers the plan is waiting on.
+- **Escape hatch** — the user can say "accept all remaining recommendations": every open decision locks at its recommended answer and is recorded as such in the plan. Offer it explicitly when the load-bearing tier exceeds ~4 questions.
+
+This stays ONE consolidated approval round — the ledger and the decisions ride WITH the plan, never as an interview before it.
+
+After approval, execute stage by stage; after each gate report rounds used, findings fixed/rebutted, and the reviewer model. If reality diverges from the plan (escalations, new ground discovered), say so at the moment it happens, not in the final report.
 
 **Gate execution means invoking the `/codex-debate` or `/codex-check` skill** for that stage — load the skill and follow its protocol. Never substitute an ad-hoc codex CLI call: in particular `codex review` / `codex exec review` is OpenAI's own separate review flow — it bypasses the round protocol, the verdict schema, the model selection, and the sandbox rules, and does NOT count as a gate.
 

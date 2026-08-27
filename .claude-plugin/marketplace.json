@@ -1,0 +1,15 @@
+{
+  "name": "codex-skills",
+  "description": "Marketplace for the claude-codex-skills repo: cross-model review and planning skills where Claude builds and Codex reviews.",
+  "owner": {
+    "name": "johngorat",
+    "url": "https://github.com/johngorat"
+  },
+  "plugins": [
+    {
+      "name": "codex-skills",
+      "source": "./",
+      "description": "Codex-gated engineering skills: codex-check, codex-debate, codex-plan."
+    }
+  ]
+}

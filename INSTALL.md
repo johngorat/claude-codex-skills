@@ -32,6 +32,29 @@ the debate skill.
 Codex runs on a ChatGPT subscription (OAuth login), not a paid API key — review
 tokens draw from the plan's rolling 5-hour quota window, not a per-token bill.
 
+## Two distribution channels
+
+- **This runbook (canonical):** clone + `install.sh` — transactional installs,
+  staleness records, `--verify`/`--refresh`, bare skill names (`/codex-check`).
+  Steps 1–10 below.
+- **Plugin channel (additional):** one-command install with automatic updates,
+  no clone needed. Skills arrive NAMESPACED (`/codex-skills:codex-check`):
+
+  ```
+  /plugin marketplace add johngorat/claude-codex-skills
+  /plugin install codex-skills@codex-skills
+  ```
+
+  Steps 3–6 (codex CLI, auth, probe, model choice) apply unchanged — run the
+  probe/resolver scripts from the installed plugin's skill directories. One
+  difference is load-bearing: the plugin cache is REPLACED WHOLESALE on every
+  update, so an in-tree `model.txt` pin cannot live there — plugin installs
+  pin via the MACHINE PIN instead (`~/.claude/codex-skills-pins/<skill>.txt`,
+  Step 6), which survives updates and is exactly what the resolver's guided
+  bootstrap offers. Do not install BOTH channels on one machine: two
+  same-described copies of every skill would compete for model-triggered
+  invocation.
+
 ## Step 1 — Ask the human: install scope
 
 - **User scope** (default) — `~/.claude/skills/` (Windows:
@@ -115,10 +138,14 @@ prerequisite.
 ## Step 6 — Models: resolve, verify, let the human choose
 
 The skills resolve their reviewer model through a strict ladder — explicit
-override (`use terra` in the invocation) → machine-local pin
-(`<skill dir>/model.txt`) → catalog → role map — and **REFUSE with a guided
-bootstrap when nothing resolves**. They never guess, never silently fall back
-to another model, and never write a pin by themselves.
+override (`use terra` in the invocation) → in-tree pin
+(`<skill dir>/model.txt`) → machine pin
+(`~/.claude/codex-skills-pins/<skill>.txt` — survives plugin updates and
+refreshes; the ONLY pin a plugin install can hold) → catalog → role map — and
+**REFUSE with a guided bootstrap when nothing resolves**. They never guess,
+never silently fall back to another model, and never write a pin by
+themselves. A present-but-broken pin at either rung refuses rather than fall
+through — an explicit choice is never silently masked.
 
 1. On the npm channel the catalog cache refreshes whenever codex runs; warm it
    once (also a live smoke of the CLI):
@@ -156,7 +183,11 @@ to another model, and never write a pin by themselves.
      catalog and picks up future families (5.7, 5.8, …) by itself.
    - Any other choice, or the flagship is not accessible on this plan →
      confirm with the human, then (after Step 7) write the slug into the
-     INSTALLED skill dir: `echo <slug> > <installed skill dir>/model.txt`.
+     INSTALLED skill dir: `echo <slug> > <installed skill dir>/model.txt` —
+     or, on the plugin channel (or to survive ANY reinstall), into the
+     machine pin: `mkdir -p ~/.claude/codex-skills-pins && echo <slug> >
+     ~/.claude/codex-skills-pins/<skill>.txt` (`<skill>` = `codex-check` /
+     `codex-debate`). If both exist, the in-tree pin wins.
    - If a skill later refuses with "no model resolves", that refusal prints
      this same bootstrap: run `--propose`, confirm a listed candidate with
      the human, write the pin — the only sanctioned way a pin comes into
@@ -218,7 +249,8 @@ What each loud failure means:
 
 Reviewer staleness (is the MODEL current, not the files) is a separate,
 report-only check — run it against the INSTALLED skill (the pin it inspects
-is the `model.txt` next to its own script directory):
+is the EFFECTIVE one: the `model.txt` next to its own script directory when
+present, else the machine pin under `~/.claude/codex-skills-pins/`):
 
 ```bash
 bash <installed skill dir>/scripts/preflight-model.sh

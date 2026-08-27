@@ -85,6 +85,22 @@ folder into `~/.claude/skills/` alongside the generic three.
 
 ## Installation
 
+### Option 0 — as a plugin (one command, auto-updates)
+
+```
+/plugin marketplace add johngorat/claude-codex-skills
+/plugin install codex-skills@codex-skills
+```
+
+Skills arrive namespaced (`/codex-skills:codex-debate`, …); enable auto-update
+in the `/plugin` menu and new versions pull in on their own. You still need
+the Codex CLI + login (Option B step 1) and a model choice ([Model
+selection](#model-selection)). One caveat: the plugin cache is replaced on
+every update, so a model pin for a plugin install goes into
+`~/.claude/codex-skills-pins/<skill>.txt` — never into the cached skill dir.
+Pick ONE channel per machine: plugin OR installer, not both (two copies of
+every skill would compete for invocation).
+
 ### Option A — let Claude install it (recommended)
 
 Clone this repo, open Claude Code, and say:
@@ -141,7 +157,11 @@ first:
    (e.g. a cheaper tier to save quota; delete the file to return to auto).
    Pins are only ever written with your explicit confirmation — nothing
    creates one silently.
-3. **Auto** — the top validated catalog tier. Today that's `gpt-5.6-sol`;
+3. **Machine pin** — `~/.claude/codex-skills-pins/<skill>.txt`: same
+   semantics, but it survives refreshes and plugin updates (the only pin a
+   plugin install can hold). The in-tree pin wins when both exist; a broken
+   pin at either rung refuses loudly instead of falling through.
+4. **Auto** — the top validated catalog tier. Today that's `gpt-5.6-sol`;
    when 5.7/5.8 families ship, auto picks them up — no skill edit needed.
 
 When nothing resolves (no override, no pin, no usable catalog), the skill
@@ -192,7 +212,7 @@ why, or — on deadlock — both sides' positions so you can decide.
 | `Error 400: No eligible ChatGPT workspaces found` | Same admin toggle — workspace not Codex-enabled |
 | 401 `require_sso_login` | `codex logout && codex login` |
 | "model requires a newer version of Codex" | upgrade through the channel that installed it: `npm install -g @openai/codex@latest`, or the standalone package's own updater |
-| A skill refuses with "no model resolves" | `bash <installed skill dir>/scripts/resolve-model.sh --propose debate`; if it lists candidates, confirm one and write it to `<installed skill dir>/model.txt` — if it lists NONE, restore a naming source first (its printed remedy; usually reinstall/update codex) |
+| A skill refuses with "no model resolves" | `bash <installed skill dir>/scripts/resolve-model.sh --propose debate`; if it lists candidates, confirm one and write it to `<installed skill dir>/model.txt` (or, on the plugin channel, to `~/.claude/codex-skills-pins/<skill>.txt`) — if it lists NONE, restore a naming source first (its printed remedy; usually reinstall/update codex) |
 | Reviews feel stale (old model family) | `bash <installed skill dir>/scripts/preflight-model.sh` — silent means fresh; otherwise one line names what is stale and the fix |
 | Installed skill behaves oddly / files differ | `bash install.sh --verify` names the drift and its remedy; `--refresh` fixes copy installs |
 | Rate-limit mid-debate | Plan quota (rolling 5-hour window) exhausted — the loop stops cleanly; retry later |

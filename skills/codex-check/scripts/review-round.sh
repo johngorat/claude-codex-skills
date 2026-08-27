@@ -20,6 +20,15 @@
 #   - `-` as the PROMPT argument = read the prompt from stdin; it stays last.
 #   - nohup + detach, because foreground calls die at the Bash ceiling and
 #     harness-tracked background tasks have been observed killed within a minute.
+#   - Resume-target law: `codex exec resume` with a missing or garbage id has
+#     been observed (third-party measurement, 2026-07-08, adopted here) to
+#     silently fall back to the MOST RECENT session instead of erroring — and
+#     a wrong-target resume looks exactly like a successful one. So the id is
+#     shape-validated BEFORE any launch, and the run dir pins its thread the
+#     same way it pins its model (one thread per run; the pin is written on
+#     the FIRST resume — round 1 returns before the thread.started event
+#     exists, so rounds 2 vs 3+ get cross-run protection, round 1 vs 2 gets
+#     the shape gate).
 set -euo pipefail
 
 RUN_DIR=$1; MODEL=$2; EFFORT=$3; SCHEMA=$4; THREAD_ID=${5:-}
@@ -45,6 +54,25 @@ elif [ -n "$THREAD_ID" ]; then
   exit 2
 else
   printf '%s\n' "$MODEL" > "$RUN_DIR/model"
+fi
+
+# Resume-target law (header): validate the id's shape, then pin one thread
+# per run dir. Both failures exit BEFORE any codex process exists.
+if [ -n "$THREAD_ID" ]; then
+  if ! printf '%s\n' "$THREAD_ID" | grep -Eq \
+      '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'; then
+    echo "ERROR: thread id '$THREAD_ID' is not a UUID — refusing to resume: codex has been observed silently resuming the MOST RECENT session on a malformed id, and a wrong-target resume looks successful. Take the id from round 1's thread.started event" >&2
+    exit 2
+  fi
+  if [ -s "$RUN_DIR/thread" ]; then
+    RECORDED_THREAD=$(cat "$RUN_DIR/thread")
+    if [ "$RECORDED_THREAD" != "$THREAD_ID" ]; then
+      echo "ERROR: thread id '$THREAD_ID' differs from this run's recorded thread '$RECORDED_THREAD' — one thread per run dir; a cross-run resume would graft rounds onto a foreign review. Pass '$RECORDED_THREAD' or start a fresh run dir" >&2
+      exit 2
+    fi
+  else
+    printf '%s\n' "$THREAD_ID" > "$RUN_DIR/thread"
+  fi
 fi
 
 # Rotate previous round's artifacts instead of truncating them: token usage in

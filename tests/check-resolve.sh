@@ -32,7 +32,11 @@ PIN="$T/skill/model.txt"
 
 export CODEX_HOME="$T/codex"
 export XDG_CACHE_HOME="$T/xdg"
-mkdir -p "$CODEX_HOME"
+# Hermeticity: without this seam the resolver would read the REAL
+# ~/.claude/codex-skills-pins of whoever runs the suite.
+export CLAUDE_SKILLS_PIN_DIR="$T/pins"
+MPIN="$T/pins/skill.txt"   # fixture skill dir is $T/skill -> basename "skill"
+mkdir -p "$CODEX_HOME" "$T/pins"
 
 run() { # run <expected-exit> <desc> -- args...; stdout -> $out, stderr -> $errout
   want=$1; desc=$2; shift 3
@@ -105,10 +109,30 @@ run 0 "override outranks pin" -- debate gpt-9.9-c1
 run 1 "invalid override refuses" -- debate gpt-9.9-bogus
 rm -f "$PIN"
 
+# ---- 8b. machine pin: rung between model.txt and the automatic sources ------
+# resolves when model.txt is absent (plugin-cache install shape)
+printf 'gpt-9.9-testterra\n' > "$MPIN"
+run 0 "machine pin resolves when model.txt absent" -- debate
+[ "$out" = "gpt-9.9-testterra	machine-pin" ] && ok || bad "machine-pin: got '$out'"
+# model.txt outranks the machine pin
+printf 'gpt-9.9-c1\n' > "$PIN"
+run 0 "model.txt outranks machine pin" -- debate
+[ "$out" = "gpt-9.9-c1	pin" ] && ok || bad "pin-over-machine: got '$out'"
+# a BROKEN model.txt refuses — a valid machine pin must NOT rescue it
+printf 'gpt-9.9-no-such-model\n' > "$PIN"
+run 1 "broken model.txt not rescued by machine pin" -- debate
+case $errout in *pin*NO\ offline\ evidence*) ok ;; *) bad "broken-pin-with-machine wording: $errout" ;; esac
+rm -f "$PIN"
+# a broken machine pin refuses loudly — cache must not mask it
+printf 'gpt-9.9-no-such-model\n' > "$MPIN"
+run 1 "invalid machine pin refuses (never falls through)" -- debate
+case $errout in *machine\ pin*NO\ offline\ evidence*) ok ;; *) bad "invalid-machine-pin wording: $errout" ;; esac
+rm -f "$MPIN"
+
 # ---- 9. stdout purity: exactly one slug<TAB>source line ---------------------
 n=$(bash "$R" check 2>/dev/null | wc -l | tr -d ' ')
 [ "$n" = "1" ] && ok || bad "stdout is $n lines, wanted exactly 1"
-bash "$R" check 2>/dev/null | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]*	(override|pin|cache|rolemap)$' \
+bash "$R" check 2>/dev/null | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]*	(override|pin|machine-pin|cache|rolemap)$' \
   && ok || bad "stdout line does not match '<slug>\\t<source>'"
 
 # ---- 10. --propose reports candidates without resolving ----------------------
@@ -477,6 +501,28 @@ if bash "$RR" "$rd" gpt-b medium "$rd/schema.json" >/dev/null 2>&1; then
   bad "no-thread relaunch with another model did not fail"
 else ok; fi
 [ ! -f "$rd/pid" ] && ok || bad "no-thread model swap still launched codex"
+rm -rf "$rd"
+
+# ---- 25. review-round resume-target law: bad ids refuse BEFORE any launch -----
+# (codex observed silently resuming the MOST RECENT session on a garbage id —
+# both refusal paths must exit 2 with no codex process ever spawned.)
+rd=$(mktemp -d)
+printf 'x\n' > "$rd/round.input"
+printf '{}\n' > "$rd/schema.json"
+printf 'gpt-a\n' > "$rd/model"
+if bash "$RR" "$rd" gpt-a medium "$rd/schema.json" "not-a-uuid" >/dev/null 2>"$T/stderr"; then
+  bad "malformed thread id did not refuse"
+else
+  [ $? -eq 2 ] 2>/dev/null; ok
+fi
+case $(cat "$T/stderr") in *not\ a\ UUID*) ok ;; *) bad "malformed-id refusal wording: $(cat "$T/stderr")" ;; esac
+[ ! -f "$rd/pid" ] && ok || bad "malformed thread id still launched codex"
+printf 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\n' > "$rd/thread"   # as if a resume already pinned it
+if bash "$RR" "$rd" gpt-a medium "$rd/schema.json" "11111111-2222-3333-4444-555555555555" >/dev/null 2>"$T/stderr"; then
+  bad "cross-run thread id did not refuse"
+else ok; fi
+case $(cat "$T/stderr") in *recorded\ thread*) ok ;; *) bad "cross-run refusal wording: $(cat "$T/stderr")" ;; esac
+[ ! -f "$rd/pid" ] && ok || bad "cross-run thread id still launched codex"
 rm -rf "$rd"
 
 printf '%s\n' "check-resolve: $pass passed, $fail failed"

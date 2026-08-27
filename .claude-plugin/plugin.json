@@ -1,0 +1,12 @@
+{
+  "name": "codex-skills",
+  "description": "Codex-gated engineering skills: /codex-check (one-shot second-tier review), /codex-debate (adversarial review loop until APPROVED), /codex-plan (staged plans with a review tier per stage). Claude builds, Codex reviews read-only.",
+  "author": {
+    "name": "johngorat",
+    "url": "https://github.com/johngorat"
+  },
+  "homepage": "https://github.com/johngorat/claude-codex-skills",
+  "repository": "https://github.com/johngorat/claude-codex-skills",
+  "license": "MIT",
+  "keywords": ["codex", "review", "adversarial-review", "planning", "skills"]
+}

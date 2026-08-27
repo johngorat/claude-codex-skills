@@ -5,4 +5,7 @@
 * text=auto
 *.sh text eol=lf
 *.md text
-*.json text
+# eol=lf: the plugin cache is a byte copy of a checkout — pin JSON to LF so
+# an autocrlf=true clone cannot ship CRLF manifests (and so the CR guard in
+# tests/check-plugin.sh stays truthful on such clones).
+*.json text eol=lf

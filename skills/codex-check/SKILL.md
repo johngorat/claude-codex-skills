@@ -14,6 +14,7 @@ description: One-shot Codex review of the current diff — a single round, no de
 - **Use for:** routine work that follows already-reviewed patterns, small diffs with limited blast radius, config and docs changes, a fast sanity pass before commit.
 - **Do NOT use for:** infrastructure code, the first run of a new pipeline or template, validators/self-checks, or changes whose bugs surface late and cost a lot to find. Those get `/codex-debate`.
 - **Escalation rule:** if after triage at least one `blocker` or `major` finding stands — Claude agrees it is real and non-trivial, or cannot confidently refute it — say so and recommend running `/codex-debate` for that change. Do not silently absorb an unresolved major.
+- **Inspection default (whoever made the thing never checks the thing):** when substantive implementation work finishes WITHOUT any review gate — no check, no debate — OFFER this check before calling the work done. The user declining is fine and costs nothing, but the skip must be VISIBLE (stated in the wrap-up / session record), never silent; and the offer never auto-runs the review — quota is spent only on an explicit yes. Trivial mechanical edits don't trigger the offer.
 
 ## Model
 

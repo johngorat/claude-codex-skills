@@ -23,7 +23,10 @@ cp "$ROOT/skills/codex-debate/scripts/preflight-model.sh" "$T/skill/scripts/"
 P="$T/skill/scripts/preflight-model.sh"
 PIN="$T/skill/model.txt"
 export CODEX_HOME="$T/codex"
-mkdir -p "$CODEX_HOME"
+# Hermeticity: keep the preflight off the real ~/.claude/codex-skills-pins.
+export CLAUDE_SKILLS_PIN_DIR="$T/pins"
+MPIN="$T/pins/skill.txt"
+mkdir -p "$CODEX_HOME" "$T/pins"
 
 run_pf() { out=$(bash "$P" 2>"$T/perr"); got=$?; }
 
@@ -58,6 +61,17 @@ run_pf
 case $out in *stale=*pin-unknown-to-map*--propose*) ok ;;
   *) bad "pin-unknown line malformed: '$out'" ;; esac
 rm -f "$PIN"
+
+# ---- 4a. machine pin is the effective pin when model.txt is absent ------------
+printf 'gpt-9.9-retired\n' > "$MPIN"
+run_pf
+case $out in *stale=*pin-unknown-to-map*) ok ;;
+  *) bad "unknown machine pin not reported: '$out'" ;; esac
+# ...but a known model.txt outranks it back to silence
+printf 'gpt-9.9-p1\n' > "$PIN"
+run_pf
+[ -z "$out" ] && ok || bad "model.txt did not outrank the machine pin: '$out'"
+rm -f "$PIN" "$MPIN"
 
 # ---- 4b. malformed pin: sentinel in the line, structure stays parseable -------
 printf 'bad; remedy: arbitrary\n' > "$PIN"
