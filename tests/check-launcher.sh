@@ -496,6 +496,18 @@ else:
 PYP
 cat > "$T/bin/codex" <<FAKE
 #!/usr/bin/env bash
+# FAITHFUL DOUBLE: the real \`codex login status\` is an instant, local,
+# read-only query that prints its status line to STDERR (measured
+# 2026-08-28, auth-status.sh header). The fake must answer it the same way
+# and must NEVER become a payload for it (no beacon write, no hang) — a
+# double that hangs on a status query makes the launcher's bounded 5s auth
+# preflight burn in full on EVERY launch, parking C1 exactly on its
+# deadline (the flake measured on the Mac 2026-08-28). Every other
+# invocation is a review launch and runs the bounded payload as before.
+if [ "\${1:-}" = login ] && [ "\${2:-}" = status ]; then
+  echo "Logged in using ChatGPT" >&2
+  exit 0
+fi
 exec "$PY" "$TN/fakepayload.py" "$TN/beacon" "\$(cat "$T/fake.mode" 2>/dev/null || echo hang)" "$FAKE_HANG" "\$@"
 FAKE
 chmod +x "$T/bin/codex"
