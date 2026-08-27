@@ -170,7 +170,12 @@ fi
 # The helper's own failure (codex/python3 missing) must surface with ITS
 # remedy, never collapse into a proceedable mode=unknown — only the helper
 # itself may claim unknown (exit 0).
-AUTH_ERR="$RUN_DIR/.auth-status.err"
+# unique no-clobber stderr capture: a FIXED name could truncate a
+# pre-existing file — or, as a symlink, an arbitrary target — on open
+AUTH_ERR=$(mktemp "$RUN_DIR/.auth-status.err.XXXXXX") || {
+  echo "ERROR: cannot create a scratch file in $RUN_DIR" >&2
+  exit 2
+}
 AUTH_EXIT=0
 AUTH_LINE=$(bash "$(dirname "$0")/auth-status.sh" 2>"$AUTH_ERR" </dev/null) || AUTH_EXIT=$?
 if [ "$AUTH_EXIT" -ne 0 ]; then

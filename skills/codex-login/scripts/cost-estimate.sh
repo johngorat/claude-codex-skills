@@ -114,7 +114,8 @@ if slug not in prices:
     sys.exit(0)
 
 in_price, out_price = prices[slug]
-in_tokens = (os.path.getsize(input_file) // 4 + OVERHEAD_TOKENS) * rounds
+# ceiling division: a worst-case estimate never rounds DOWN past a cap
+in_tokens = ((os.path.getsize(input_file) + 3) // 4 + OVERHEAD_TOKENS) * rounds
 out_tokens = OUT_PER_ROUND * rounds
 usd = in_tokens / 1e6 * in_price + out_tokens / 1e6 * out_price
 cap = read_cap()

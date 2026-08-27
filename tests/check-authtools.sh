@@ -58,6 +58,12 @@ astatus "Logged in with an API key - sk-x"
 case $out in "auth-status: mode=unknown"*) ok ;; *) bad "near-miss api wording claimed a channel: '$out'" ;; esac
 astatus "Could not determine whether logged in"
 case $out in "auth-status: mode=unknown"*) ok ;; *) bad "error sentence claimed a channel: '$out'" ;; esac
+# anchored matching: a NEGATED measured phrase must not claim its channel
+astatus "Not logged in using an API key"
+case $out in "auth-status: mode=unknown"*) ok ;; *) bad "negated api phrase claimed a channel: '$out'" ;; esac
+# unknown detail is VERBATIM: spacing survives, control chars are escaped
+astatus "Weird   status	with spacing"
+case $out in *"Weird   status\\twith spacing"*) ok ;; *) bad "detail not verbatim: '$out'" ;; esac
 [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = "1" ] && ok || bad "auth-status printed more than one line"
 # env_key reflects the env var, not the login state
 printf 'Not logged in\n' > "$T/status.txt"
@@ -114,6 +120,11 @@ case $out in *NO-PRICE*) ok ;; *) bad "NaN price produced an estimate: '$out'" ;
 printf 'gpt-x-test 5 30\n' > "$T/pins/api-prices.txt"
 run_ce "$IN" gpt-x-test banana
 [ "$got" -eq 2 ] && ok || bad "garbage rounds exit $got (wanted 2)"
+# ceiling division: 40001 bytes -> 10001 (+12000), never rounded DOWN
+printf 'y' >> "$IN"
+run_ce "$IN" gpt-x-test
+case $out in *"est_in_tokens=22001"*) ok ;; *) bad "ceil division line: '$out'" ;; esac
+dd if=/dev/zero of="$IN" bs=1000 count=40 2>/dev/null
 
 # ---- 3. round-report: fixtures for every trend class ---------------------------
 mk_events() { # mk_events <path> <in> <cached> <out>
@@ -175,7 +186,17 @@ mk_verdict "$rd/verdict.r1.json" APPROVED "[]"
 mk_events "$rd/events.jsonl" 500 0 0
 run_rr "$rd"
 case $line in *"latest_verdict=pending latest_new=0:0:0:0"*) ok ;; *) bad "pending-after-approved line: '$line'" ;; esac
-case $line in *"trend=approved"*) bad "running round inherited trend=approved" ;; *) ok ;; esac
+case $line in *"trend=insufficient"*) ok ;; *) bad "running round did not force trend=insufficient: '$line'" ;; esac
+
+# pending after a 3->2 slope: the completed rounds' convergence must not leak
+rd="$T/rr-pending3"; mkdir -p "$rd"
+mk_events "$rd/events.r1.jsonl" 1000 0 100
+mk_verdict "$rd/verdict.r1.json" REVISE "[$F_MAJ,$F_MAJ,$F_MAJ]"
+mk_events "$rd/events.r2.jsonl" 1000 0 100
+mk_verdict "$rd/verdict.r2.json" REVISE "[$F_MAJ,$F_MAJ]"
+mk_events "$rd/events.jsonl" 500 0 0
+run_rr "$rd"
+case $line in *"latest_verdict=pending"*"trend=insufficient"*) ok ;; *) bad "pending-after-slope line: '$line'" ;; esac
 
 # rebound: 3 -> 2 -> 3 must NEVER read as converging
 rd="$T/rr-rebound"; mkdir -p "$rd"

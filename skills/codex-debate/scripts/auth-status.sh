@@ -50,7 +50,7 @@ command -v python3 >/dev/null 2>&1 || {
 
 export PYTHONIOENCODING=utf-8
 exec python3 - <<'AUTH_PY'
-import os, subprocess, sys
+import os, re, subprocess, sys
 
 fixture = os.environ.get("AUTH_STATUS_FIXTURE")
 if fixture:
@@ -72,25 +72,28 @@ else:
     except OSError as e:
         text = "<status query failed: %s>" % e
 
-# classify on the WHOLE text, not line-wise (parsing law): the status output
-# is short; unknown shapes are reported verbatim rather than guessed at.
-# ONLY the measured wordings claim a channel — a generic "logged in"
-# fallback would classify a future API wording (or an error sentence that
-# merely contains the words) as the subscription channel and pin the wrong
-# BILLING identity; anything unmatched is unknown, honestly.
-low = text.lower()
-if "logged in using an api key" in low:
+# classify the WHOLE normalized status, ANCHORED (parsing law): only the
+# measured wordings, as complete shapes, claim a channel. Substring matching
+# would let a negated or quoting diagnostic claim one ("Not logged in using
+# an API key" contains the api phrase) and pin the wrong BILLING identity;
+# anything unmatched is unknown, verbatim, honestly.
+norm = " ".join(text.split()).lower()
+if re.fullmatch(r"logged in using an api key( - \S+)?", norm):
     mode = "apikey"
-elif "logged in using chatgpt" in low:
+elif norm == "logged in using chatgpt":
     mode = "chatgpt"
-elif "not logged in" in low:
+elif norm == "not logged in":
     mode = "none"
 else:
     mode = "unknown"
 env_key = "yes" if os.environ.get("OPENAI_API_KEY") else "no"
 line = "auth-status: mode=%s env_key=%s" % (mode, env_key)
 if mode == "unknown":
-    compact = " ".join(text.split()) or "<empty>"
-    line += " detail=\"%s\"" % compact.replace("\\", "\\\\").replace("\"", "\\\"")
+    # VERBATIM detail on one line: every original character survives —
+    # control characters are escaped, never collapsed (a diagnostic needs
+    # the exact future wording, spacing included)
+    esc = (text.replace("\\", "\\\\").replace("\"", "\\\"")
+               .replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t"))
+    line += " detail=\"%s\"" % (esc or "<empty>")
 print(line)
 AUTH_PY

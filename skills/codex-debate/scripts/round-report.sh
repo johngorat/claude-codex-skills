@@ -11,7 +11,7 @@
 #   round-report: rounds=<n> latest_verdict=<APPROVED|REVISE|pending>
 #     latest_new=<b>:<M>:<m>:<n> recurring=<k>/<total>
 #     tokens_in=<n> tokens_out=<n> model=<slug|unknown> auth=<mode|unknown>
-#     trend=<approved|insufficient|converging|flat> drift=<yes|no>
+#     trend=<approved|insufficient|converging|flat|rebound> drift=<yes|no>
 # Exit 0 always when the report was produced; exit 2 on usage/no data.
 #
 # Mechanical signal definitions (plan AUTH-SCOREBOARD-WATCHDOG, cosmetic
@@ -154,7 +154,11 @@ for k, verdict, events_path in rounds:
     prior_sites |= set(site_of(f) for f in fs)
 
 # ---- signals (exhaustive; see header for the definitions) ---------------------
-if latest_verdict == "APPROVED":
+# pending FIRST: a running latest round is never described by the completed
+# rounds' slope — 3->2 + a running third must not read converging
+if latest_verdict == "pending":
+    trend = "insufficient"
+elif latest_verdict == "APPROVED":
     trend = "approved"
 elif len(weights) < 2:
     trend = "insufficient"
