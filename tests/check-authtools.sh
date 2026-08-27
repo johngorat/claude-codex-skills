@@ -113,6 +113,33 @@ else
   ok
 fi
 rm -f "$T/pins/cap-usd.txt"
+# non-regular config files fail closed INSTANTLY — a FIFO would hang a plain
+# open() until a writer appears, and a cap check must never hang a gate
+if mkfifo "$T/pins/cap-usd.txt" 2>/dev/null && [ -p "$T/pins/cap-usd.txt" ]; then
+  run_ce "$IN" gpt-x-test
+  [ "$got" -eq 1 ] && ok || bad "FIFO cap failed open: exit $got"
+  rm -f "$T/pins/cap-usd.txt"
+  mv "$T/pins/api-prices.txt" "$T/pins/api-prices.bak"
+  mkfifo "$T/pins/api-prices.txt"
+  run_ce "$IN" gpt-x-test
+  case $out in *NO-PRICE*) ok ;; *) bad "FIFO prices produced an estimate: '$out'" ;; esac
+  rm -f "$T/pins/api-prices.txt" && mv "$T/pins/api-prices.bak" "$T/pins/api-prices.txt"
+else
+  rm -f "$T/pins/cap-usd.txt"
+  echo "SKIP (counted ok x2): FIFOs unavailable — non-regular config cases skipped LOUDLY"
+  ok; ok
+fi
+# ANY symlinked cap is broken (record law: plain regular files only), even
+# one pointing at a valid number
+printf '99.0\n' > "$T/cap-target.txt"
+if ln -s "$T/cap-target.txt" "$T/pins/cap-usd.txt" 2>/dev/null && [ -L "$T/pins/cap-usd.txt" ]; then
+  run_ce "$IN" gpt-x-test
+  [ "$got" -eq 1 ] && ok || bad "symlinked cap failed open: exit $got"
+else
+  echo "SKIP (counted ok): symlinks unavailable — symlinked-cap case skipped LOUDLY"
+  ok
+fi
+rm -f "$T/pins/cap-usd.txt"
 # invalid price numbers drop the entry -> NO-PRICE remedy, never an estimate
 printf 'gpt-x-test nan 30\n' > "$T/pins/api-prices.txt"
 run_ce "$IN" gpt-x-test

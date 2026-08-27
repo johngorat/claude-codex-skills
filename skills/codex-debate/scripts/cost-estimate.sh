@@ -41,7 +41,7 @@ command -v python3 >/dev/null 2>&1 || {
 
 export PYTHONIOENCODING=utf-8
 exec python3 - "$1" "$2" "${3:-1}" <<'COST_PY'
-import math, os, re, sys
+import math, os, re, stat, sys
 
 input_file, slug, rounds_arg = sys.argv[1], sys.argv[2], sys.argv[3]
 if not re.fullmatch(r"[0-9]{1,3}", rounds_arg) or int(rounds_arg) < 1:
@@ -71,39 +71,69 @@ def _usd(text):
         return None
     return v
 
-def read_prices():
-    """{slug: (in_usd_per_1M, out_usd_per_1M)}; unreadable file or invalid
-    numbers -> entry skipped, so the slug lands on the NO-PRICE branch and
-    its remedy (a broken table must never invent an estimate)."""
-    table = {}
+def _read_regular(path):
+    """('absent'|'broken', None) or ('ok', text) for a SMALL config file
+    that must be a plain regular file — the same law as every other record
+    in this family. NEVER blocks: a FIFO (or a symlink to one) would hang a
+    plain open() until a writer appears, so the path is lstat-gated first
+    and the descriptor is opened non-blocking (no-op flag on Windows, where
+    FIFOs cannot occur at these paths) and fstat-verified BEFORE reading —
+    the pre-check alone would race a swap."""
     try:
-        with open(prices_file, encoding="utf-8-sig") as f:
-            for line in f:
-                parts = line.split()
-                if len(parts) != 3 or line.lstrip().startswith("#"):
-                    continue
-                pin, pout = _usd(parts[1]), _usd(parts[2])
-                if pin is None or pout is None:
-                    continue
-                table[parts[0]] = (pin, pout)
-    except (OSError, UnicodeError):
-        pass
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return "absent", None
+    except OSError:
+        return "broken", None
+    if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+        return "broken", None
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
+    except OSError:
+        return "broken", None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return "broken", None
+        data = os.read(fd, 1 << 16)
+    except OSError:
+        return "broken", None
+    finally:
+        os.close(fd)
+    try:
+        return "ok", data.decode("utf-8-sig")
+    except UnicodeError:
+        return "broken", None
+
+def read_prices():
+    """{slug: (in_usd_per_1M, out_usd_per_1M)}; a missing/broken table or an
+    invalid entry -> the slug lands on the NO-PRICE branch and its remedy
+    (a broken table must never invent an estimate — and never block)."""
+    status, text = _read_regular(prices_file)
+    table = {}
+    if status != "ok":
+        return table
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) != 3 or line.lstrip().startswith("#"):
+            continue
+        pin, pout = _usd(parts[1]), _usd(parts[2])
+        if pin is None or pout is None:
+            continue
+        table[parts[0]] = (pin, pout)
     return table
 
 def read_cap():
     """float cap or None (no cap). EVERY present-but-broken shape fails
     closed as 0.0 (=> EXCEEDED): unparseable text, non-finite or negative
-    values, unreadable files, and a DANGLING SYMLINK — open() raises
-    FileNotFoundError for it, but the entry exists (lexists), and an
-    explicit cap must never be silently ignored."""
-    try:
-        with open(cap_file, encoding="utf-8-sig") as f:
-            text = f.read().strip()
-    except FileNotFoundError:
-        return 0.0 if os.path.lexists(cap_file) else None
-    except (OSError, UnicodeError):
+    values, unreadable files, dangling or ANY symlink, and non-regular
+    files (FIFO included — see _read_regular; an explicit cap must never
+    be silently ignored, and a cap check must never hang a gate)."""
+    status, text = _read_regular(cap_file)
+    if status == "absent":
+        return None
+    if status != "ok":
         return 0.0
-    v = _usd(text)
+    v = _usd(text.strip())
     return 0.0 if v is None else v
 
 prices = read_prices()
