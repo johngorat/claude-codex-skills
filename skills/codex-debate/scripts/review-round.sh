@@ -31,7 +31,11 @@
 #     refuses, and an id-LESS launch into a run dir that already pinned a
 #     thread refuses too (it would open a second thread in the same run).
 #     Round 1 returns before the thread.started event exists, so rounds 2
-#     vs 3+ get cross-run protection and round 1 vs 2 gets the shape gate.
+#     vs 3+ get cross-run protection via the record; the round-1-to-2 window
+#     is guarded by the LAUNCH MARKER ($RUN_DIR/launched, created no-clobber
+#     right before the initial exec): a second id-less launch refuses, and a
+#     hang-retry of round 1 requires the operator to rm the marker first —
+#     an explicit statement that the previous launch is dead and unwanted.
 set -euo pipefail
 
 RUN_DIR=$1; MODEL=$2; EFFORT=$3; SCHEMA=$4; THREAD_ID=${5:-}
@@ -65,6 +69,17 @@ fi
 # count as present (a corrupt record, not an absent one), hence the -L arm.
 if [ -z "$THREAD_ID" ] && { [ -e "$RUN_DIR/thread" ] || [ -L "$RUN_DIR/thread" ]; }; then
   echo "ERROR: $RUN_DIR/thread already records this run's thread but no thread id was passed — a fresh launch here would open a SECOND thread in the same run dir. Pass the recorded id (cat $RUN_DIR/thread) or start a fresh run dir" >&2
+  exit 2
+fi
+# The thread record exists only from the FIRST resume on, so it cannot guard
+# the window between round 1 and that resume — the launch marker does: it is
+# created no-clobber right before the initial exec. An id-less launch that
+# finds it refuses; the ONE sanctioned way past it is the conscious hang-retry
+# ritual (kill the dead round, rm the marker, relaunch) — deleting the marker
+# is the operator's explicit statement that no thread from this run dir is
+# alive or wanted.
+if [ -z "$THREAD_ID" ] && { [ -e "$RUN_DIR/launched" ] || [ -L "$RUN_DIR/launched" ]; }; then
+  echo "ERROR: round 1 was already launched from this run dir ($RUN_DIR/launched exists) — a second id-less launch would open ANOTHER thread. Resume with the id from events.jsonl's thread.started; or, if that round is DEAD (you killed a hang), rm $RUN_DIR/launched to consciously re-run round 1; or start a fresh run dir" >&2
   exit 2
 fi
 if [ -n "$THREAD_ID" ]; then
@@ -118,6 +133,11 @@ if [ -f "$RUN_DIR/events.jsonl" ]; then
 fi
 
 if [ -z "$THREAD_ID" ]; then
+  # no-clobber: two concurrent id-less launches must not both start a thread
+  if ! (set -C; : > "$RUN_DIR/launched") 2>/dev/null; then
+    echo "ERROR: $RUN_DIR/launched appeared concurrently — another launch is using this run dir; refusing" >&2
+    exit 2
+  fi
   nohup codex exec \
     -m "$MODEL" -c "model_reasoning_effort=$EFFORT" \
     --sandbox read-only --json \

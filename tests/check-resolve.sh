@@ -529,6 +529,12 @@ rr_refuses "id-less launch with recorded thread" "SECOND thread"
 : > "$rd/thread"
 rr_refuses "empty thread record" "never overwritten" "11111111-2222-3333-4444-555555555555"
 [ ! -s "$rd/thread" ] && ok || bad "empty thread record was overwritten"
+# the LAUNCH MARKER guards the round-1-to-first-resume window: a second
+# id-less launch refuses even though no thread record exists yet
+rm -f "$rd/thread"
+: > "$rd/launched"
+rr_refuses "id-less relaunch after round 1 (marker present)" "already launched"
+rm -f "$rd/launched"
 # a DANGLING SYMLINK record: -e alone is false for it, but it must still
 # count as a present (corrupt) record — both the id-less and the id path
 rm -f "$rd/thread"
