@@ -138,6 +138,12 @@ else
   echo "SKIP (counted ok x2): FIFOs unavailable — non-regular config cases skipped LOUDLY"
   ok; ok
 fi
+# an OVERSIZED cap is broken as a whole — a valid-looking prefix followed by
+# junk beyond the read limit must never be accepted as the cap value
+{ printf '99'; dd if=/dev/zero bs=1000 count=70 2>/dev/null | tr '\0' ' '; printf 'junk'; } > "$T/pins/cap-usd.txt"
+run_ce "$IN" gpt-x-test
+[ "$got" -eq 1 ] && ok || bad "oversized cap accepted its prefix: exit $got"
+rm -f "$T/pins/cap-usd.txt"
 # ANY symlinked cap is broken (record law: plain regular files only), even
 # one pointing at a valid number
 printf '99.0\n' > "$T/cap-target.txt"

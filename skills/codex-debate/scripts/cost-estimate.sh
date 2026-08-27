@@ -91,14 +91,25 @@ def _read_regular(path):
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
     except OSError:
         return "broken", None
+    LIMIT = 1 << 16   # these config files are a few lines; bigger = broken
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             return "broken", None
-        data = os.read(fd, 1 << 16)
+        # read THROUGH EOF, not one bounded chunk: a single read would
+        # silently accept the valid-looking PREFIX of an oversized file
+        # ("99" + 64KiB of padding + junk must be broken, not cap=99)
+        data = b""
+        while len(data) <= LIMIT:
+            chunk = os.read(fd, LIMIT + 1 - len(data))
+            if not chunk:
+                break
+            data += chunk
     except OSError:
         return "broken", None
     finally:
         os.close(fd)
+    if len(data) > LIMIT:
+        return "broken", None
     try:
         return "ok", data.decode("utf-8-sig")
     except UnicodeError:
