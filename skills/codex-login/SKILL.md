@@ -101,12 +101,16 @@ ${CLAUDE_SKILLS_PIN_DIR:-~/.claude/codex-skills-pins}/cap-usd.txt
 **Prices are the skill's job, never a user question** (measured user
 feedback: price-confirmation questions are confusing and the numbers are
 findable). On switching to the API, or when `cost-estimate.sh` reports
-NO-PRICE: look up the CURRENT prices yourself — the authoritative source is
-OpenAI's official pricing page (platform.openai.com/docs/pricing, currently
-redirecting to developers.openai.com/api/docs/pricing); cross-check one
-secondary source if the page is unreachable — take the WORST-CASE tier when
+NO-PRICE: look up the CURRENT prices yourself — the ONLY source that may
+populate the file is OpenAI's official pricing page
+(platform.openai.com/docs/pricing, currently redirecting to
+developers.openai.com/api/docs/pricing). Take the WORST-CASE tier when
 several exist (e.g. long-context rates), write `api-prices.txt`, and simply
-REPORT one line: which models, which rates, which source and date. Refresh
+REPORT one line: which models, which rates, which source and date. If the
+official page is unreachable, do NOT write anything from elsewhere — report
+that the refresh is unavailable and leave the existing file untouched (a
+missing table keeps failing safe as NO-PRICE); secondary sources are only a
+sanity check AFTER official rates are in hand, never a substitute. Refresh
 the same way whenever the file is older than ~a month or a gate's estimate
 looks implausible.
 
