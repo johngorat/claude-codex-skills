@@ -114,7 +114,7 @@ Run `bash "<skill dir>/scripts/round-report.sh" "$RUN_DIR"` and post the standar
 Then act on the signals — this is the loop's own convergence law, not decoration:
 
 - **`drift=yes`** (≥half of the round's findings re-flag already-debated sites): STOP before the next round. Patching again is the known dead end — present the cures and let the user pick: narrow the contract (delete the failing capability class), raise the findings to lemma-level rules, pin reality with executable fixtures, re-gate the burned surface in a FRESH thread, or re-scope the task.
-- **`trend=flat` with `drift=no`** (majors not decreasing, but the sites are new): spend AT MOST one more round, and say explicitly that you are spending it; still flat after that → stop as above.
+- **`trend=flat` or `trend=rebound` with `drift=no`** (majors stalled — or climbing again after progress: the classic new-layer asymptote shape — but the sites are new): spend AT MOST one more round, and say explicitly that you are spending it; still flat/rebounding after that → stop as above.
 - **Requirements-level findings** (capacity caps, policy trade-offs, "no compliant option exists") — regardless of trend: stop immediately; those are USER decisions and further rounds only re-review prose.
 - **`converging` / `approved`**: continue normally.
 

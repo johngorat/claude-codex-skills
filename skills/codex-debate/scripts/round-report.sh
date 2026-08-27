@@ -15,17 +15,28 @@
 # Exit 0 always when the report was produced; exit 2 on usage/no data.
 #
 # Mechanical signal definitions (plan AUTH-SCOREBOARD-WATCHDOG, cosmetic
-# defaults — the debate SKILL.md owns what to DO about them):
+# defaults — the debate SKILL.md owns what to DO about them). The cases are
+# EXHAUSTIVE; in particular a RISING latest weight can never read as
+# converging:
 #   weight(r)   = count of blocker+major findings in round r's verdict.
-#   approved    — the latest completed verdict is APPROVED.
-#   insufficient— fewer than 2 completed REVISE rounds: no slope to judge.
+#   approved    — the latest verdict is APPROVED.
+#   insufficient— no judgeable slope: fewer than 2 completed rounds, a
+#     single non-decreasing transition, or a stall not yet two transitions
+#     deep. Also the label while the LATEST round is still running (its
+#     fields report pending/zeros — a running round is never described by
+#     its predecessor's numbers).
 #   converging  — weight strictly decreased on the last transition, or is 0.
-#   flat        — weight did not decrease on the LAST TWO transitions.
-#   drift=yes   — ≥half of the latest round's findings sit on a (file,line)
-#     site already flagged in an EARLIER round: a re-flagged exact site after
-#     a claimed fix is the non-convergence smell (review-asymptotes rule),
-#     reported separately from the count trend so a gate that keeps finding
-#     NEW sites is never mislabeled as drifting.
+#   flat        — weight equal on the last transition AND the one before it
+#     did not decrease (a confirmed two-transition stall).
+#   rebound     — weight INCREASED on the last transition (with ≥3 rounds of
+#     history): a new layer opened after progress — the classic asymptote
+#     shape, at least as alarming as flat.
+#   drift=yes   — ≥half of the latest round's FINDINGS sit on a (file,line)
+#     site already flagged in an EARLIER round (finding-count on both sides
+#     of the ratio): a re-flagged exact site after a claimed fix is the
+#     non-convergence smell (review-asymptotes rule), reported separately
+#     from the count trend so a gate that keeps finding NEW sites is never
+#     mislabeled as drifting.
 # Rotation naming (review-round.sh): events.rK/verdict.rK = round K;
 # unsuffixed events.jsonl/verdict.json = the latest round (verdict may not
 # exist yet while it runs -> latest_verdict=pending).
@@ -103,9 +114,11 @@ def sev_counts(verdict):
             c[s] += 1
     return c
 
-def sites(verdict):
-    return set((f.get("file"), f.get("line"))
-               for f in (verdict or {}).get("findings", []) or [])
+def findings_of(verdict):
+    return (verdict or {}).get("findings", []) or []
+
+def site_of(f):
+    return (f.get("file"), f.get("line"))
 
 # ---- table -------------------------------------------------------------------
 total_in = total_out = 0
@@ -121,31 +134,38 @@ for k, verdict, events_path in rounds:
     if verdict is None:
         print("%5d  %-8s  %-11s  %5s  %9d  %10d"
               % (k, "pending", "-", "-", tin, tout))
+        # the LATEST fields always describe THIS round — a running round is
+        # pending with zero findings, never its predecessor's numbers
+        latest_counts = dict.fromkeys(SEV, 0)
+        latest_total = recurring = 0
+        latest_verdict = "pending"
         continue
     c = sev_counts(verdict)
-    s = sites(verdict)
-    rec = sum(1 for x in s if x in prior_sites)
+    fs = findings_of(verdict)
+    # drift ratio counts FINDINGS on both sides: two findings re-flagging
+    # one prior site are two re-flags, not one
+    rec = sum(1 for f in fs if site_of(f) in prior_sites)
     print("%5d  %-8s  %d/%d/%d/%d      %5d  %9d  %10d"
           % (k, verdict.get("verdict", "?"), c["blocker"], c["major"],
              c["minor"], c["nit"], rec, tin, tout))
     weights.append(c["blocker"] + c["major"])
-    latest_counts, latest_total, recurring = c, len(s), rec
+    latest_counts, latest_total, recurring = c, len(fs), rec
     latest_verdict = verdict.get("verdict", "unknown")
-    prior_sites |= s
+    prior_sites |= set(site_of(f) for f in fs)
 
-# ---- signals -------------------------------------------------------------------
+# ---- signals (exhaustive; see header for the definitions) ---------------------
 if latest_verdict == "APPROVED":
     trend = "approved"
 elif len(weights) < 2:
     trend = "insufficient"
-elif len(weights) >= 3 and weights[-1] >= weights[-2] >= weights[-3]:
+elif weights[-1] == 0 or weights[-1] < weights[-2]:
+    trend = "converging"
+elif weights[-1] > weights[-2]:
+    trend = "rebound" if len(weights) >= 3 else "insufficient"
+elif len(weights) >= 3 and weights[-2] >= weights[-3]:
     trend = "flat"
-elif weights[-1] < weights[-2] or weights[-1] == 0:
-    trend = "converging"
-elif len(weights) == 2:
-    trend = "insufficient"   # one non-decreasing transition alone: no slope yet
 else:
-    trend = "converging"
+    trend = "insufficient"   # a stall only one transition deep: no verdict yet
 drift = "yes" if latest_total and recurring * 2 >= latest_total else "no"
 
 model = read_line("model") or "unknown"

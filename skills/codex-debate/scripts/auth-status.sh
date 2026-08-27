@@ -74,16 +74,17 @@ else:
 
 # classify on the WHOLE text, not line-wise (parsing law): the status output
 # is short; unknown shapes are reported verbatim rather than guessed at.
+# ONLY the measured wordings claim a channel — a generic "logged in"
+# fallback would classify a future API wording (or an error sentence that
+# merely contains the words) as the subscription channel and pin the wrong
+# BILLING identity; anything unmatched is unknown, honestly.
 low = text.lower()
 if "logged in using an api key" in low:
     mode = "apikey"
+elif "logged in using chatgpt" in low:
+    mode = "chatgpt"
 elif "not logged in" in low:
     mode = "none"
-elif "logged in" in low:
-    # any other authenticated shape is the subscription/OAuth family; the
-    # positive apikey match above is the only branch allowed to claim the
-    # api channel
-    mode = "chatgpt"
 else:
     mode = "unknown"
 env_key = "yes" if os.environ.get("OPENAI_API_KEY") else "no"

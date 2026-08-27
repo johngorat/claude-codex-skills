@@ -41,7 +41,7 @@ command -v python3 >/dev/null 2>&1 || {
 
 export PYTHONIOENCODING=utf-8
 exec python3 - "$1" "$2" "${3:-1}" <<'COST_PY'
-import os, re, sys
+import math, os, re, sys
 
 input_file, slug, rounds_arg = sys.argv[1], sys.argv[2], sys.argv[3]
 if not re.fullmatch(r"[0-9]{1,3}", rounds_arg) or int(rounds_arg) < 1:
@@ -59,9 +59,22 @@ cap_file = os.path.join(pin_dir, "cap-usd.txt")
 OVERHEAD_TOKENS = 12000   # measured 11,699 on an empty prompt, rounded up
 OUT_PER_ROUND = 25000     # S031: 119K output over 5 xhigh rounds
 
+def _usd(text):
+    """Parse a price/cap number FAIL-CLOSED: only a finite, non-negative
+    float counts. float() alone accepts 'nan' — and `usd > nan` is False,
+    which would silently turn a corrupt cap into cap=ok."""
+    try:
+        v = float(text)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(v) or v < 0:
+        return None
+    return v
+
 def read_prices():
-    """{slug: (in_usd_per_1M, out_usd_per_1M)}; unreadable file -> {} (the
-    NO-PRICE branch names the remedy — a broken table must not crash)."""
+    """{slug: (in_usd_per_1M, out_usd_per_1M)}; unreadable file or invalid
+    numbers -> entry skipped, so the slug lands on the NO-PRICE branch and
+    its remedy (a broken table must never invent an estimate)."""
     table = {}
     try:
         with open(prices_file, encoding="utf-8-sig") as f:
@@ -69,28 +82,29 @@ def read_prices():
                 parts = line.split()
                 if len(parts) != 3 or line.lstrip().startswith("#"):
                     continue
-                try:
-                    table[parts[0]] = (float(parts[1]), float(parts[2]))
-                except ValueError:
+                pin, pout = _usd(parts[1]), _usd(parts[2])
+                if pin is None or pout is None:
                     continue
+                table[parts[0]] = (pin, pout)
     except (OSError, UnicodeError):
         pass
     return table
 
 def read_cap():
-    """float cap or None. A present-but-broken cap is treated as 0.0 —
-    a corrupt EXPLICIT cap must fail closed (refuse), never fail open."""
+    """float cap or None (no cap). EVERY present-but-broken shape fails
+    closed as 0.0 (=> EXCEEDED): unparseable text, non-finite or negative
+    values, unreadable files, and a DANGLING SYMLINK — open() raises
+    FileNotFoundError for it, but the entry exists (lexists), and an
+    explicit cap must never be silently ignored."""
     try:
         with open(cap_file, encoding="utf-8-sig") as f:
             text = f.read().strip()
     except FileNotFoundError:
-        return None
+        return 0.0 if os.path.lexists(cap_file) else None
     except (OSError, UnicodeError):
         return 0.0
-    try:
-        return float(text)
-    except ValueError:
-        return 0.0
+    v = _usd(text)
+    return 0.0 if v is None else v
 
 prices = read_prices()
 if slug not in prices:

@@ -52,6 +52,12 @@ case $out in "auth-status: mode=none env_key="*) ok ;; *) bad "none line: '$out'
 astatus "Session token refreshed (build 999)"
 case $out in "auth-status: mode=unknown env_key="*detail=\"Session\ token*) ok ;;
   *) bad "unknown line lacks verbatim detail: '$out'" ;; esac
+# only the MEASURED wordings claim a channel — near-misses are unknown, never
+# a guessed billing identity
+astatus "Logged in with an API key - sk-x"
+case $out in "auth-status: mode=unknown"*) ok ;; *) bad "near-miss api wording claimed a channel: '$out'" ;; esac
+astatus "Could not determine whether logged in"
+case $out in "auth-status: mode=unknown"*) ok ;; *) bad "error sentence claimed a channel: '$out'" ;; esac
 [ "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" = "1" ] && ok || bad "auth-status printed more than one line"
 # env_key reflects the env var, not the login state
 printf 'Not logged in\n' > "$T/status.txt"
@@ -83,11 +89,29 @@ printf '0.50\n' > "$T/pins/cap-usd.txt"
 run_ce "$IN" gpt-x-test
 [ "$got" -eq 1 ] && ok || bad "over-cap exit $got (wanted 1)"
 case $out in *"cap=EXCEEDED"*) ok ;; *) bad "over-cap line: '$out'" ;; esac
-# a present-but-broken cap fails CLOSED (treated as 0 -> EXCEEDED)
-printf 'not-a-number\n' > "$T/pins/cap-usd.txt"
-run_ce "$IN" gpt-x-test
-[ "$got" -eq 1 ] && ok || bad "broken cap failed open: exit $got"
+# EVERY present-but-broken cap shape fails CLOSED (treated as 0 -> EXCEEDED):
+# unparseable text, NaN (float() accepts it and `usd > nan` is False!),
+# negative, and a dangling symlink (open() says FileNotFoundError but the
+# entry EXISTS)
+for capval in 'not-a-number' 'nan' '-5'; do
+  printf '%s\n' "$capval" > "$T/pins/cap-usd.txt"
+  run_ce "$IN" gpt-x-test
+  [ "$got" -eq 1 ] && ok || bad "broken cap '$capval' failed open: exit $got"
+done
 rm -f "$T/pins/cap-usd.txt"
+if ln -s "$T/no-such-target" "$T/pins/cap-usd.txt" 2>/dev/null && [ -L "$T/pins/cap-usd.txt" ]; then
+  run_ce "$IN" gpt-x-test
+  [ "$got" -eq 1 ] && ok || bad "dangling cap symlink failed open: exit $got"
+else
+  echo "SKIP (counted ok): symlinks unavailable — dangling-cap case skipped LOUDLY"
+  ok
+fi
+rm -f "$T/pins/cap-usd.txt"
+# invalid price numbers drop the entry -> NO-PRICE remedy, never an estimate
+printf 'gpt-x-test nan 30\n' > "$T/pins/api-prices.txt"
+run_ce "$IN" gpt-x-test
+case $out in *NO-PRICE*) ok ;; *) bad "NaN price produced an estimate: '$out'" ;; esac
+printf 'gpt-x-test 5 30\n' > "$T/pins/api-prices.txt"
 run_ce "$IN" gpt-x-test banana
 [ "$got" -eq 2 ] && ok || bad "garbage rounds exit $got (wanted 2)"
 
@@ -143,6 +167,44 @@ mk_events "$rd/events.jsonl" 500 0 0
 run_rr "$rd"
 case $line in *"latest_verdict=pending"*"trend=insufficient"*) ok ;; *) bad "pending line: '$line'" ;; esac
 
+# a RUNNING round after completed ones: the latest fields must say pending/
+# zeros — never the predecessor's APPROVED numbers
+rd="$T/rr-pending2"; mkdir -p "$rd"
+mk_events "$rd/events.r1.jsonl" 1000 0 100
+mk_verdict "$rd/verdict.r1.json" APPROVED "[]"
+mk_events "$rd/events.jsonl" 500 0 0
+run_rr "$rd"
+case $line in *"latest_verdict=pending latest_new=0:0:0:0"*) ok ;; *) bad "pending-after-approved line: '$line'" ;; esac
+case $line in *"trend=approved"*) bad "running round inherited trend=approved" ;; *) ok ;; esac
+
+# rebound: 3 -> 2 -> 3 must NEVER read as converging
+rd="$T/rr-rebound"; mkdir -p "$rd"
+i=1
+for n in 3 2; do
+  fs=""; j=0
+  while [ "$j" -lt "$n" ]; do
+    fs="$fs{\"file\":\"r$i-f$j\",\"line\":1,\"severity\":\"major\",\"issue\":\"i\",\"suggestion\":null,\"confidence\":1},"
+    j=$((j + 1))
+  done
+  mk_events "$rd/events.r$i.jsonl" 1000 0 100
+  mk_verdict "$rd/verdict.r$i.json" REVISE "[${fs%,}]"
+  i=$((i + 1))
+done
+mk_events "$rd/events.jsonl" 1000 0 100
+mk_verdict "$rd/verdict.json" REVISE '[{"file":"x1","line":1,"severity":"major","issue":"i","suggestion":null,"confidence":1},{"file":"x2","line":1,"severity":"major","issue":"i","suggestion":null,"confidence":1},{"file":"x3","line":1,"severity":"blocker","issue":"i","suggestion":null,"confidence":1}]'
+run_rr "$rd"
+case $line in *"trend=rebound"*) ok ;; *) bad "rebound line: '$line'" ;; esac
+
+# drift denominator counts FINDINGS: two re-flags of one prior site + one new
+# site = 2/3 -> drift=yes
+rd="$T/rr-drift2"; mkdir -p "$rd"
+mk_events "$rd/events.r1.jsonl" 1000 0 100
+mk_verdict "$rd/verdict.r1.json" REVISE '[{"file":"same.sh","line":7,"severity":"major","issue":"i","suggestion":null,"confidence":1}]'
+mk_events "$rd/events.jsonl" 1000 0 100
+mk_verdict "$rd/verdict.json" REVISE '[{"file":"same.sh","line":7,"severity":"major","issue":"a","suggestion":null,"confidence":1},{"file":"same.sh","line":7,"severity":"minor","issue":"b","suggestion":null,"confidence":1},{"file":"new.sh","line":1,"severity":"major","issue":"c","suggestion":null,"confidence":1}]'
+run_rr "$rd"
+case $line in *"recurring=2/3"*"drift=yes") ok ;; *) bad "finding-count drift line: '$line'" ;; esac
+
 # not a run dir -> exit 2
 rd="$T/rr-empty"; mkdir -p "$rd"
 run_rr "$rd"
@@ -172,6 +234,23 @@ rr_ref "mid-run channel switch" "one channel per run"
 : > "$rd/auth"
 rr_ref "empty channel record" "never overwritten"
 [ ! -s "$rd/auth" ] && ok || bad "empty channel record was overwritten"
+# a SYMLINKED channel record is corrupt even when its target holds the right
+# value (-s alone would follow it, letting the pin be swapped from outside)
+rm -f "$rd/auth"
+printf 'chatgpt\n' > "$T/auth-target.txt"
+if ln -s "$T/auth-target.txt" "$rd/auth" 2>/dev/null && [ -L "$rd/auth" ]; then
+  rr_ref "symlinked channel record" "not a regular file"
+else
+  echo "SKIP (counted ok x3): symlinks unavailable — symlinked-auth case skipped LOUDLY"
+  ok; ok; ok
+fi
+rm -f "$rd/auth"
+# the helper's OWN failure surfaces with its remedy — never a proceedable
+# mode=unknown (fixture seam off, codex pointed at nothing)
+out=$(unset AUTH_STATUS_FIXTURE; CODEX_BIN="$T/no-such-codex" bash "$RR" "$rd" gpt-a medium "$rd/schema.json" 2>"$T/stderr"); got=$?
+[ "$got" -eq 2 ] && ok || bad "helper failure: exit $got, wanted 2"
+case $(cat "$T/stderr") in *"auth-status.sh failed"*) ok ;; *) bad "helper-failure wording: $(cat "$T/stderr")" ;; esac
+[ ! -e "$rd/launched" ] && ok || bad "helper failure kept the launch marker"
 
 printf 'check-authtools: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

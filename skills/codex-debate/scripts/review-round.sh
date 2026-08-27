@@ -167,22 +167,37 @@ fi
 # launch on a 401; mode=unknown proceeds recorded as unknown — an unparsed
 # future status wording must not brick gates, codex itself will refuse an
 # actually-unauthenticated call.
-AUTH_LINE=$(bash "$(dirname "$0")/auth-status.sh" 2>/dev/null </dev/null || true)
+# The helper's own failure (codex/python3 missing) must surface with ITS
+# remedy, never collapse into a proceedable mode=unknown — only the helper
+# itself may claim unknown (exit 0).
+AUTH_ERR="$RUN_DIR/.auth-status.err"
+AUTH_EXIT=0
+AUTH_LINE=$(bash "$(dirname "$0")/auth-status.sh" 2>"$AUTH_ERR" </dev/null) || AUTH_EXIT=$?
+if [ "$AUTH_EXIT" -ne 0 ]; then
+  echo "ERROR: auth-status.sh failed (exit $AUTH_EXIT): $(cat "$AUTH_ERR" 2>/dev/null) — fix that first (its message names the remedy)" >&2
+  rm -f "$AUTH_ERR"
+  exit 2
+fi
+rm -f "$AUTH_ERR"
 CHANNEL=${AUTH_LINE#*mode=}; CHANNEL=${CHANNEL%% *}
 [ -n "$CHANNEL" ] || CHANNEL=unknown
 if [ "$CHANNEL" = "none" ]; then
   echo "ERROR: codex is not logged in on any channel — run /codex-login (or 'codex login' / 'codex login --with-api-key') and relaunch" >&2
   exit 2
 fi
-if [ -s "$RUN_DIR/auth" ]; then
+# the record must be a plain, non-empty regular file — -s alone follows a
+# symlink, which would both accept a corrupt record shape and let the pinned
+# value be swapped from OUTSIDE the run dir
+if [ -e "$RUN_DIR/auth" ] || [ -L "$RUN_DIR/auth" ]; then
+  if [ ! -f "$RUN_DIR/auth" ] || [ -L "$RUN_DIR/auth" ] || [ ! -s "$RUN_DIR/auth" ]; then
+    echo "ERROR: $RUN_DIR/auth exists but is empty or not a regular file — the channel record is corrupt and is never overwritten. Start a fresh run dir" >&2
+    exit 2
+  fi
   RECORDED_AUTH=$(cat "$RUN_DIR/auth" 2>/dev/null || true)
   if [ "$RECORDED_AUTH" != "$CHANNEL" ]; then
     echo "ERROR: auth channel is now '$CHANNEL' but this run started on '$RECORDED_AUTH' — one channel per run (billing/quota identity). Finish the run on '$RECORDED_AUTH' or start a fresh run dir" >&2
     exit 2
   fi
-elif [ -e "$RUN_DIR/auth" ] || [ -L "$RUN_DIR/auth" ]; then
-  echo "ERROR: $RUN_DIR/auth exists but is empty or not a regular file — the channel record is corrupt and is never overwritten. Start a fresh run dir" >&2
-  exit 2
 else
   printf '%s\n' "$CHANNEL" > "$RUN_DIR/auth"
 fi
