@@ -121,7 +121,7 @@ Codex holds exactly ONE auth mode at a time — the human picks the channel:
 | Channel | Login | Billing |
 |---|---|---|
 | **ChatGPT subscription** (default) | `codex login` (browser OAuth; in Claude Code: `! codex login`) | reviews draw from the plan's rolling 5-hour quota window — no per-token bill |
-| **API key** | `printenv OPENAI_API_KEY \| codex login --with-api-key` (or paste the key into that command directly — never into a chat) | pay-per-token; the review skills show a cost estimate and honor a machine-local cap before spending (seeded via `/codex-login` after Step 7) |
+| **API key** | `printenv OPENAI_API_KEY \| codex login --with-api-key` — the key must reach stdin WITHOUT appearing in the command line (an already-set env var, a secret manager's print command, or `read -rs K && printf '%s' "$K" \| codex login --with-api-key`); a literal key typed into a command lands in shell history | pay-per-token; the review skills show a cost estimate and honor a machine-local cap before spending (seeded via `/codex-login` after Step 7) |
 
 An `OPENAI_API_KEY` env var alone does NOT authenticate codex (measured:
 a run without login fails 401) — it only feeds the explicit login command.

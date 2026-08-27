@@ -46,12 +46,18 @@ Resolve `$MODEL` (see Model) and `SCHEMA=<skill dir>/review-schema.json`.
 
 ```bash
 git add -N .   # intent-to-add: new files show up in the diff
-git diff --unified=5 "$BASE" | codex exec \
+git diff --unified=5 "$BASE" > "$RUN_DIR/round.input"
+```
+
+**Channel & cost guard (BEFORE the call spends anything).** `bash "<skill dir>/scripts/auth-status.sh"` — `mode=none` → stop; remedy `/codex-login`. `mode=apikey` → this single pass bills per token: run `bash "<skill dir>/scripts/cost-estimate.sh" "$RUN_DIR/round.input" "$MODEL" 1`, present the line, and proceed only on the user's explicit yes; exit 1 = the machine-local cap is exceeded — hard stop (the USER edits the cap file to override; `/codex-login` seeds prices/cap).
+
+```bash
+codex exec \
   -m "$MODEL" -c model_reasoning_effort=medium \
   --sandbox read-only --json \
   --output-schema "$SCHEMA" \
   -o "$RUN_DIR/verdict.json" \
-  "<review prompt>" | tee "$RUN_DIR/events.jsonl" | tail -3
+  "<review prompt>" < "$RUN_DIR/round.input" | tee "$RUN_DIR/events.jsonl" | tail -3
 PYTHONIOENCODING=utf-8 python3 -m json.tool "$RUN_DIR/verdict.json"
 ```
 
@@ -68,7 +74,7 @@ For each finding: real and quick to fix → fix now; real but substantial → es
 
 ### 4. Report
 
-Open with the standard scoreboard: run `bash "<skill dir>/scripts/round-report.sh" "$RUN_DIR"` and quote its line (found counts by severity, tokens, model, channel), then add your triage — fixed `b/M/m/n`, rebutted `x`. On the `apikey` channel append the cost line (`bash "<skill dir>/scripts/cost-estimate.sh" "$RUN_DIR/round.input" "$MODEL" 1` — informational after a single advisory round; `auth-status.sh` tells the channel). Then: findings left open, and if any open `blocker`/`major` remains → explicitly recommend `/codex-debate` for this change.
+Open with the standard scoreboard: run `bash "<skill dir>/scripts/round-report.sh" "$RUN_DIR"` and quote its line (found counts by severity, tokens, model, channel), then add your triage — fixed `b/M/m/n`, rebutted `x`. On the `apikey` channel restate the step-2 estimate next to the actual tokens spent. Then: findings left open, and if any open `blocker`/`major` remains → explicitly recommend `/codex-debate` for this change.
 
 ## Troubleshooting
 

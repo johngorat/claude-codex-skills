@@ -24,12 +24,14 @@ description: Check which auth channel the Codex reviewer CLI is on (ChatGPT subs
 
 ## Hard rules
 
-- The key is NEVER echoed, stored, or passed through this skill's files or
-  the conversation. Automation pipes it directly between the env var and
-  codex (`printenv OPENAI_API_KEY | codex login --with-api-key`); when the
-  user must paste a key, they paste it into THAT command in their own
-  terminal (`! printenv…` / typing the login command themselves), never
-  into the chat.
+- The key is NEVER echoed, stored, or passed through this skill's files,
+  the conversation, or a shell COMMAND LINE (a literal key in a command
+  lands in shell history). Automation pipes it directly between the env var
+  and codex (`printenv OPENAI_API_KEY | codex login --with-api-key`);
+  without the env var the user runs, in their own terminal, either their
+  secret manager's print command piped the same way or
+  `read -rs K && printf '%s' "$K" | codex login --with-api-key` — stdin
+  only, never an argument, never the chat.
 - Never switch, and never `codex logout`, without the user explicitly
   choosing it THIS session. Reporting is free; switching is an act.
 - Only status queries here: `codex login status` / `codex login
@@ -55,17 +57,22 @@ wording to record, not a failure.
 
 State: the active mode; what it means for review cost — subscription:
 reviews draw from the plan's rolling 5-hour window, no per-token bill;
-API key: pay-per-token (order of magnitude at 2026 prices: a 5-round
-top-tier debate gate ≈ $13 worst case, a second-tier check ≈ $0.40) — and
-whether an env key is present (= the API switch is one command).
+API key: pay-per-token — the AUTHORITATIVE number for any gate is
+`cost-estimate.sh` output against the verified local price table, never a
+remembered figure (non-authoritative 2026-08 example, for scale only: a
+5-round top-tier debate gate ≈ $13 worst case, a second-tier check ≈
+$0.40) — and whether an env key is present (= the API switch is one
+command).
 
 ### 3. Switches (on explicit user choice)
 
 - **→ API key.** With `env_key=yes`, fully automated:
   `printenv OPENAI_API_KEY | codex login --with-api-key`, then re-run
   auth-status and confirm `mode=apikey`. Without the env var, the user runs
-  the same command with their key source themselves (suggest `! `-prefix in
-  Claude Code); never accept the key via chat.
+  a stdin-only variant themselves (suggest `! `-prefix in Claude Code):
+  their secret manager's print command piped in, or
+  `read -rs K && printf '%s' "$K" | codex login --with-api-key`. Never a
+  literal key in a command line (shell history), never via chat.
   After a successful switch, run the cost-guard bootstrap (step 4).
 - **→ Subscription.** Browser OAuth cannot be automated: hand off
   `codex login` (in Claude Code: `! codex login`), wait for the user to say
