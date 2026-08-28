@@ -45,12 +45,16 @@ positions.
 | [`codex-debate`](skills/codex-debate/SKILL.md) | Run a task, then debate the resulting diff with Codex — fix real findings, rebut false ones, loop until `APPROVED` + green local checks. Up to 5 rounds, flagship model. |
 | [`codex-check`](skills/codex-check/SKILL.md) | One-shot advisory review of the diff — single round, second-tier model, no loop. Claude triages the findings; an unresolved major escalates to `/codex-debate`. |
 | [`codex-plan`](skills/codex-plan/SKILL.md) | Turn a multi-stage task into a staged plan: review tier per stage, past reviewer findings baked in as hard requirements, tools to reuse named. Approve the plan, then it executes via the two skills above. |
+| [`codex-plan-fast`](skills/codex-plan-fast/SKILL.md) | Fast lane of `codex-plan`: micro-plan posted and executed in the same turn, one `codex-check` gate at the end. A fit gate routes anything infrastructure-shaped back to the full plan. |
 | [`codex-login`](skills/codex-login/SKILL.md) | Report which auth channel the Codex CLI is on and switch: ChatGPT subscription (rolling 5-hour quota, no per-token bill) vs API key (pay-per-token, no window — the review skills then show a cost estimate and honor a machine-local cap before spending). The two are mutually exclusive; switching is an explicit re-login this skill automates where possible. |
 
 ### Which one to use
 
 - `/codex-plan` — the entry point for anything multi-stage (a port, a migration,
   a new pipeline run). It decides where the other two are applied.
+- `/codex-plan-fast` — the same discipline for small/mid tasks on proven rails:
+  plan and execution in one turn, one check at the end; its fit gate hands
+  anything infrastructure-shaped back to `/codex-plan`.
 - `/codex-check` — routine changes that follow already-reviewed patterns, small
   diffs, config/docs edits, a quick pre-commit sanity pass.
 - `/codex-debate` — infrastructure code, the first run of a new pipeline or

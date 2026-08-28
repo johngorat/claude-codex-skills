@@ -11,6 +11,8 @@ description: Turn a substantial multi-stage task into a staged, gate-reviewed ex
 
 The plan is the deliverable of the first step. Never start implementing before the user has seen and approved it.
 
+A task that passes /codex-plan-fast's fit gate (proven rails, diff-bounded blast radius, one check covers it) belongs in that lane — route it there instead of staging it here.
+
 **No pre-interview.** Steps 1–6 are autonomous document work — do them without asking the user anything. Questions that come up while drafting go INTO the plan as marked decision points and are asked together with the plan presentation: one consolidated approval round, not a conversation before the work starts.
 
 ## Procedure
