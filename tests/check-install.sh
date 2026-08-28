@@ -801,5 +801,63 @@ else
   ok; ok
 fi
 
+# ---- 55. --update: pull + refresh + NEW-skill adoption ---------------------------
+# upstream repo -> clone -> install -> upstream gains a change AND a new
+# skill -> ONE command delivers both; the pin survives
+U55="$T/up55"; W55="$T/work55"; S55="$T/state55"; D55="$T/dest55"
+mkdir -p "$U55/skills"
+cp "$ROOT/install.sh" "$U55/"
+cp -R "$ROOT/skills/codex-check" "$U55/skills/codex-check"
+rm -f "$U55/skills/codex-check/model.txt"
+git init -q "$U55"
+git -C "$U55" add -A
+git -C "$U55" -c user.email=t@example.invalid -c user.name=t commit -qm base
+git clone -q "$U55" "$W55"
+XDG_STATE_HOME="$S55" bash "$W55/install.sh" --dest "$D55" --mode copy codex-check >/dev/null 2>&1 \
+  && ok || bad "update fixture: initial install failed"
+printf 'gpt-9.9-keepme\n' > "$D55/codex-check/model.txt"
+printf '# upstream v2\n' >> "$U55/skills/codex-check/SKILL.md"
+mkdir -p "$U55/skills/newskill55/scripts"
+printf '# new skill\n' > "$U55/skills/newskill55/SKILL.md"
+git -C "$U55" add -A
+git -C "$U55" -c user.email=t@example.invalid -c user.name=t commit -qm v2
+uo=$(XDG_STATE_HOME="$S55" bash "$W55/install.sh" --update 2>&1); ue=$?
+[ "$ue" -eq 0 ] && ok || bad "--update failed: $uo"
+grep -q "upstream v2" "$D55/codex-check/SKILL.md" && ok \
+  || bad "--update did not deliver the upstream change"
+[ -f "$D55/newskill55/SKILL.md" ] && ok \
+  || bad "--update did not adopt the NEW upstream skill"
+if ls "$S55/claude-codex-skills"/install.newskill55.*.v1.json >/dev/null 2>&1; then ok
+else bad "the adopted new skill has no installation record"; fi
+[ "$(cat "$D55/codex-check/model.txt")" = "gpt-9.9-keepme" ] && ok \
+  || bad "model.txt did not survive --update"
+XDG_STATE_HOME="$S55" bash "$W55/install.sh" --verify >/dev/null 2>&1 && ok \
+  || bad "verify after --update failed"
+
+# ---- 56. --update refuses: divergence, flags, non-checkout ------------------------
+printf '# local fork\n' >> "$W55/skills/codex-check/SKILL.md"
+git -C "$W55" add -A
+git -C "$W55" -c user.email=t@example.invalid -c user.name=t commit -qm local
+printf '# upstream v3\n' >> "$U55/skills/codex-check/SKILL.md"
+git -C "$U55" add -A
+git -C "$U55" -c user.email=t@example.invalid -c user.name=t commit -qm v3
+uo=$(XDG_STATE_HOME="$S55" bash "$W55/install.sh" --update 2>&1); ue=$?
+[ "$ue" -ne 0 ] && ok || bad "--update fast-forwarded a DIVERGED checkout"
+case $uo in *--update*) ok ;; *) bad "divergence remedy not named: $uo" ;; esac
+grep -q "upstream v3" "$D55/codex-check/SKILL.md" \
+  && bad "a refused pull still touched the install" || ok
+uo=$(XDG_STATE_HOME="$S55" bash "$W55/install.sh" --update --dest "$D55" 2>&1); ue=$?
+[ "$ue" -ne 0 ] && ok || bad "--update accepted --dest"
+uo=$(XDG_STATE_HOME="$S55" bash "$SRCC/install.sh" --update 2>&1); ue=$?
+[ "$ue" -ne 0 ] && ok || bad "--update ran outside a git checkout"
+case $uo in *checkout*) ok ;; *) bad "non-checkout remedy not named: $uo" ;; esac
+# action flags are mutually exclusive: last-one-wins would let
+# `--update --refresh --dest X` silently bypass --update's flag restriction
+uo=$(XDG_STATE_HOME="$S55" bash "$W55/install.sh" --update --refresh 2>&1); ue=$?
+[ "$ue" -ne 0 ] && ok || bad "conflicting action flags were accepted"
+case $uo in *conflicting*) ok ;; *) bad "conflict not named: $uo" ;; esac
+uo=$(XDG_STATE_HOME="$S55" bash "$W55/install.sh" --refresh --verify 2>&1); ue=$?
+[ "$ue" -ne 0 ] && ok || bad "--refresh --verify was accepted"
+
 printf '%s\n' "check-install: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

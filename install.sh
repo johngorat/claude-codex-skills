@@ -5,6 +5,7 @@
 #   bash install.sh [--dest DIR] [--mode auto|copy|symlink] [skill ...]
 #   bash install.sh --verify  [skill ...]
 #   bash install.sh --refresh [skill ...]
+#   bash install.sh --update  [skill ...]   (git pull + refresh + NEW skills)
 #
 # Defaults: dest = ${CLAUDE_SKILLS_DIR:-~/.claude/skills}; install with no
 # operands takes every directory under skills/; --verify/--refresh with no
@@ -63,6 +64,12 @@
 #     refresh and MODE SWITCH; when the two sides of a mode switch carry
 #     DIFFERENT pins, the switch refuses with a reconciliation remedy
 #     instead of silently choosing one.
+#   - --update is the ONE user-facing update command: git pull --ff-only in
+#     the checkout, then the FRESHLY pulled installer re-runs the refresh and
+#     ADOPTS skills that are new upstream into every recorded destination
+#     root (in the recorded mode when the root's records agree, else auto).
+#     Pins survive as in every refresh; a pull that cannot fast-forward
+#     refuses with git's own message and touches nothing.
 #   - tracked mode-120000 entries: this repo's tree guard
 #     (tests/check-tree.sh) FORBIDS them at the source — so no export or
 #     checkout of this repo can contain a text placeholder. The install-time
@@ -120,14 +127,24 @@ while i < len(argv):
         dest_root = argv[i + 1]; i += 2
     elif a == "--mode" and i + 1 < len(argv):
         mode_req = argv[i + 1]; i += 2
-    elif a == "--verify":
-        action = "verify"; i += 1
-    elif a == "--refresh":
-        action = "refresh"; i += 1
+    elif a in ("--verify", "--refresh", "--update", "--update-local"):
+        # --update-local is the internal second phase of --update: it runs
+        # FROM the freshly pulled installer so the refresh/adoption logic
+        # postdates the pull. Action flags are MUTUALLY EXCLUSIVE: with
+        # last-one-wins, `--update --refresh --dest X` would silently become
+        # a refresh and bypass --update's flag restriction (gate finding).
+        if action != "install":
+            die("conflicting action flags --%s and %s — pick one"
+                % (action, a))
+        action = a[2:]; i += 1
     else:
         skills.append(a); i += 1
 if mode_req not in ("auto", "copy", "symlink"):
     die("unknown --mode '%s' (auto|copy|symlink)" % mode_req)
+if action in ("update", "update-local") \
+        and (dest_root is not None or mode_req != "auto"):
+    die("--update takes only skill operands — destinations and modes come "
+        "from the installation records")
 
 home = os.path.expanduser("~")
 dest_root = os.path.abspath(dest_root or os.environ.get("CLAUDE_SKILLS_DIR")
@@ -202,27 +219,32 @@ def check_name(name):
             % (name, skills_src))
     return name
 
-if skills:
-    skills = [check_name(s) for s in skills]
-elif action == "install":
-    # ONLY install enumerates the source: verify/refresh with no operands
-    # must draw their targets from the RECORDS, or a skill whose source
-    # directory disappeared upstream would be silently skipped. Discovery
-    # NEVER follows a symlink at the skill root — an untracked
-    # skills/x -> /elsewhere must not pull external files into an install —
-    # and every discovered name passes the same validation as an operand.
+def discover_source_skills():
+    """Every real skill directory under skills/, validated exactly like an
+    explicit operand. Discovery NEVER follows a symlink at the skill root —
+    an untracked skills/x -> /elsewhere must not pull external files into
+    an install."""
     try:
         names = sorted(os.listdir(skills_src))
     except OSError:
         names = []
-    skills = []
+    found = []
     for d in names:
         p = os.path.join(skills_src, d)
         if os.path.islink(p):
             die("skills/%s is a SYMLINK at the skill root — refusing to "
                 "follow it; a skill must be a real directory" % d)
         if os.path.isdir(p):
-            skills.append(check_name(d))
+            found.append(check_name(d))
+    return found
+
+if skills:
+    skills = [check_name(s) for s in skills]
+elif action == "install":
+    # ONLY install enumerates the source: verify/refresh with no operands
+    # must draw their targets from the RECORDS, or a skill whose source
+    # directory disappeared upstream would be silently skipped.
+    skills = discover_source_skills()
     if not skills:
         die("no skills found under %s" % skills_src)
 
@@ -1060,6 +1082,33 @@ def verify_record(rec):
         err("VERIFY FAIL %s at %s: %s" % (skill, dest, scan_remedy(dest, e)))
         return 1
 
+if action == "update":
+    # Pull, then RE-EXEC the freshly pulled installer for the local work.
+    # The running program text is already fully read (bash hands python a
+    # complete heredoc before exec), so the pull cannot corrupt THIS run —
+    # but the refresh/adoption logic must be the post-pull version, hence
+    # the child invocation of the new install.sh.
+    if not os.path.exists(os.path.join(src_root, ".git")):
+        die("%s is not a git checkout — update it the way it was obtained "
+            "(re-download it, or use your plugin manager), or clone the "
+            "repo and install from the clone" % src_root)
+    try:
+        out = subprocess.run(["git", "-C", src_root, "pull", "--ff-only"],
+                             capture_output=True, timeout=300)
+    except Exception as e:
+        die("git pull could not run (%s) — remedy: make `git -C %s pull` "
+            "work, then re-run --update" % (e, src_root))
+    sys.stdout.write(out.stdout.decode("utf-8", "replace"))
+    sys.stdout.flush()
+    if out.returncode != 0:
+        die("git pull --ff-only failed in %s:\n%s— remedy: resolve the "
+            "local changes or divergence it names (git -C %s status), "
+            "then re-run --update"
+            % (src_root, out.stderr.decode("utf-8", "replace"), src_root))
+    child = subprocess.run(["bash", os.path.join(src_root, "install.sh"),
+                            "--update-local"] + skills)
+    sys.exit(child.returncode)
+
 if action == "verify":
     total = 0
     recs = []
@@ -1077,7 +1126,10 @@ if action == "verify":
         total += verify_record(rec)
     sys.exit(1 if total else 0)
 
-if action == "refresh":
+def do_refresh(operands, skip_recordless=()):
+    """The --refresh body. skip_recordless: skills without a record that the
+    CALLER will handle right after (update's new-skill adoption) — for a
+    plain refresh a recordless operand stays a named failure."""
     # validate every prospective destination BEFORE the state dir is
     # mutated (lock creation, temp sweep), then reload and re-validate
     # under the lock — records may have changed while unlocked
@@ -1088,12 +1140,14 @@ if action == "refresh":
         validate_dest_root(os.path.dirname(rec["dest"]))
     sweep_stale_temps()
     failures = 0
-    targets = skills or sorted({r["skill"] for r in load_records()})
+    targets = operands or sorted({r["skill"] for r in load_records()})
     if not targets:
         err("REFRESH: no installation records exist — nothing to refresh")
     for s in targets:
         recs = load_records(s)
         if not recs:
+            if s in skip_recordless:
+                continue
             err("REFRESH FAIL %s: no installation record — remedy: install "
                 "first (bash %s/install.sh %s)" % (s, src_root, s))
             failures += 1
@@ -1117,6 +1171,39 @@ if action == "refresh":
                 failures += 1
                 continue
             install_one(s, rec["mode"], dparent)
+    return failures
+
+if action == "refresh":
+    sys.exit(1 if do_refresh(skills) else 0)
+
+if action == "update-local":
+    src_skills = discover_source_skills()
+    failures = do_refresh(skills, skip_recordless=set(src_skills))
+    # NEW-skill adoption: a skill present in the (just pulled) source but
+    # recorded NOWHERE at a destination root is installed there — an old
+    # user's `--update` must deliver new functionality, not only refresh
+    # what they already had. The root's mode is reused when its records
+    # agree; mixed records fall back to the auto capability test. The lock
+    # from do_refresh is still held (process-lifetime).
+    recs = load_records()
+    roots = {}
+    for r in recs:
+        roots.setdefault(os.path.dirname(r["dest"]), set()).add(r["mode"])
+    if not roots:
+        err("UPDATE: nothing is installed from this checkout yet — run a "
+            "plain install first (bash %s/install.sh)" % src_root)
+    wanted = [s for s in src_skills if not skills or s in skills]
+    for root in sorted(roots):
+        mode = list(roots[root])[0] if len(roots[root]) == 1 else "auto"
+        have = set()
+        for r in recs:
+            if os.path.dirname(r["dest"]) == root:
+                have.add(r["skill"])
+        for s in wanted:
+            if s in have:
+                continue
+            print("NEW skill %s — installing at %s" % (s, root))
+            install_one(s, mode, root)
     sys.exit(1 if failures else 0)
 
 validate_dest_root(dest_root)   # BEFORE the lock mutates the state dir

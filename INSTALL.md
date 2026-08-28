@@ -225,7 +225,8 @@ bash install.sh --dest <dir> --mode copy <skill>  # explicit dest/mode/skill sel
   `symlink` is an optimization where links really work; `auto` (default) picks
   by performing a REAL directory-link capability test at the destination —
   never by guessing from git config. A symlink install updates via `git pull`
-  alone; a copy install updates via `--refresh` (below).
+  alone; a copy install updates via `--refresh`; `--update` does everything
+  in one command for either mode (Step 8).
 - The install is transactional (stage → verify bytes → activate; the previous
   installation survives as a backup until the new one is verified AND
   recorded; failures roll back and say exactly what happened). Concurrent
@@ -245,7 +246,17 @@ Restart the Claude Code session afterwards so new skills register.
 ```bash
 bash install.sh --verify            # all recorded installs, both sides checked
 bash install.sh --refresh           # transactional update of copy installs
+bash install.sh --update            # ONE command: git pull + refresh + NEW skills
 ```
+
+**Updating an existing install** (any age) is one command in the checkout:
+`bash install.sh --update`. It fast-forwards the checkout, then the freshly
+pulled installer refreshes every recorded install AND adopts skills that are
+new upstream into your recorded destination (in your recorded mode; pins
+survive). A pull that cannot fast-forward refuses with git's message and
+touches nothing. Equivalent ask, if a Claude session is handy: "update the
+codex skills". Plugin installs update via `claude plugin update` instead
+(Step 1); a brand-new skill registers after a session restart.
 
 `--verify` — and the record check inside `env-probe.sh`, which the skills run
 as their once-per-session prerequisite — recheck both sides and fail closed.
