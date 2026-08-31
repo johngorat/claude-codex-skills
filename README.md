@@ -43,9 +43,9 @@ positions.
 | Skill | What it does |
 |---|---|
 | [`codex-debate`](skills/codex-debate/SKILL.md) | Run a task, then debate the resulting diff with Codex — fix real findings, rebut false ones, loop until `APPROVED` + green local checks. Up to 5 rounds, flagship model. |
-| [`codex-check`](skills/codex-check/SKILL.md) | One-shot advisory review of the diff — single round, second-tier model, no loop. Claude triages the findings; an unresolved major escalates to `/codex-debate`. |
+| [`codex-check`](skills/codex-check/SKILL.md) | One-shot advisory review of the diff — single round, second-tier model, no loop. Claude triages the findings; an unresolved major escalates to `/codex-debate`. `/codex-check opus <context>` hands the fixes for real findings to an agent on the named model while the session keeps the review and the triage (see the skill's BUILDER.md). |
 | [`codex-plan`](skills/codex-plan/SKILL.md) | Turn a multi-stage task into a staged plan: review tier per stage, past reviewer findings baked in as hard requirements, tools to reuse named. Approve the plan, then it executes via the two skills above; `/codex-plan opus <task>` hands the building to an agent on the named model while the planner keeps the gates (see the skill's BUILDER.md). |
-| [`codex-plan-fast`](skills/codex-plan-fast/SKILL.md) | Fast lane of `codex-plan`: micro-plan posted and executed in the same turn, one `codex-check` gate at the end. A fit gate routes anything infrastructure-shaped back to the full plan. |
+| [`codex-plan-fast`](skills/codex-plan-fast/SKILL.md) | Fast lane of `codex-plan`: micro-plan posted and executed in the same turn, one `codex-check` gate at the end. A fit gate routes anything infrastructure-shaped back to the full plan. `/codex-plan-fast opus <task>` hands the building to an agent on the named model while the planner keeps the fit gate and the check (see the skill's BUILDER.md). |
 | [`codex-login`](skills/codex-login/SKILL.md) | Report which auth channel the Codex CLI is on and switch: ChatGPT subscription (rolling 5-hour quota, no per-token bill) vs API key (pay-per-token, no window — the review skills then show a cost estimate and honor a machine-local cap before spending). The two are mutually exclusive; switching is an explicit re-login this skill automates where possible. |
 
 ### Which one to use

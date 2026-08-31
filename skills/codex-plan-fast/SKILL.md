@@ -10,6 +10,11 @@ where full staging costs more than it protects: the plan shrinks to a
 micro-plan in the reply, approval-by-interruption replaces the approval
 round, and review shrinks to one check.
 
+A leading bare model token (`/codex-plan-fast opus <task>`) or
+`builder=<model>` selects BUILDER MODE per [BUILDER.md](BUILDER.md): the
+builder executes the micro-plan, the planner keeps the fit gate, the check
+and all judgment. With no model named, nothing changes.
+
 ## 1. Fit gate (decide the lane FIRST)
 
 Fast fits when EVERY line holds:

@@ -9,6 +9,9 @@ description: One-shot Codex review of the current diff — a single round, no de
 
 `/codex-check <what was done, or what to focus on>` — one review round: diff → Codex findings → Claude triages and fixes → short report. No loop, no `APPROVED` gate; the output is advisory.
 
+`/codex-check opus <context>` (or `builder=<model>`) has the fixes for real findings
+implemented by a builder agent per [BUILDER.md](BUILDER.md); with no model named, nothing changes.
+
 ## When to use / when not
 
 - **Use for:** routine work that follows already-reviewed patterns, small diffs with limited blast radius, config and docs changes, a fast sanity pass before commit.

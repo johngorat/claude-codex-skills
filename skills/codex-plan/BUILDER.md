@@ -4,7 +4,11 @@ Trigger: the invocation names a builder model — a leading bare token
 (`/codex-plan opus <task>`; recognized: `opus`, `sonnet`, `haiku`) or
 `builder=<model>` anywhere in the arguments. A leading token counts as a
 model only when task text follows it; when that reading is in doubt, ask
-one button question. With no builder model named, nothing in this file
+one button question. Both syntaxes accept ONLY the recognized models: an
+unrecognized `builder=` value never dispatches and never drops to the
+default path silently — one button question (dispatch to it anyway / pick a
+recognized model / run without a builder). With no builder model named at
+all, nothing in this file
 applies and SKILL.md runs exactly as written.
 
 ## Division of labor (hard)
