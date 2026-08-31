@@ -13,6 +13,8 @@ The plan is the deliverable of the first step. Never start implementing before t
 
 A task that passes /codex-plan-fast's fit gate (proven rails, diff-bounded blast radius, one check covers it) belongs in that lane — route it there instead of staging it here.
 
+A leading bare model token (`/codex-plan opus <task>`) or `builder=<model>` selects BUILDER MODE: after approval, implementation stages are executed by a dispatched agent on that model under the contract in [BUILDER.md](BUILDER.md) — the planner keeps the gates and all judgment. With no model named, nothing changes.
+
 **No pre-interview.** Steps 1–6 are autonomous document work — do them without asking the user anything. Questions that come up while drafting go INTO the plan as marked decision points and are asked together with the plan presentation: one consolidated approval round, not a conversation before the work starts.
 
 ## Procedure
